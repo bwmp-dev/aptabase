@@ -5,6 +5,19 @@ namespace Aptabase.UnitTests.Features.ErrorReporting;
 
 public class IssueTests
 {
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("", false)]
+    [InlineData("not-an-id", false)]
+    [InlineData("00000000-0000-0000-0000-000000000000", false)]
+    [InlineData("a328eb5ef1fc4fa582221e24881369f0", true)]
+    [InlineData("a328eb5e-f1fc-4fa5-8222-1e24881369f0", true)]
+    [InlineData("{a328eb5e-f1fc-4fa5-8222-1e24881369f0}", false)]
+    public void Validates_Event_Id(string? eventId, bool valid)
+    {
+        Assert.Equal(valid, new ErrorBody { EventId = eventId, ErrorType = "Type", ErrorMessage = "message" }.IsValid());
+    }
+
     [Fact]
     public void Fingerprint_Is_Stable_And_Normalizes_Whitespace()
     {

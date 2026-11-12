@@ -18,35 +18,81 @@ public class Issue
     public DateTime? ResolvedAt { get; set; }
 }
 
+public enum IssueRecordResult { Accepted, Duplicate, QuotaExceeded, AppUnavailable }
+
 public record IssuePage(IEnumerable<Issue> Issues, long Total);
 public record IssueAccess(bool CanRead, bool CanManage);
 
 public interface IIssueStore
 {
-    Task Record(TrackingError error, CancellationToken cancellationToken);
+    Task<IssueRecordResult> Record(TrackingError error, CancellationToken cancellationToken, bool enforceQuota = false);
+    Task<int> PurgeExpiredReceipts(CancellationToken cancellationToken);
     Task<IssueAccess> GetAccess(string appId, UserIdentity user, CancellationToken cancellationToken);
-    Task<IssuePage> List(string appId, bool isDebug, string status, int offset, int limit, CancellationToken cancellationToken);
+    Task<IssuePage> List(string appId, bool isDebug, string status, int offset, int limit, CancellationToken cancellationToken, string q = "");
     Task<Issue?> Get(string appId, bool isDebug, string id, CancellationToken cancellationToken);
     Task<Issue?> SetStatus(string appId, bool isDebug, string id, string status, string ownerId, CancellationToken cancellationToken);
 }
 
 public class IssueStore(IDbContext db) : IIssueStore
 {
-    public async Task Record(TrackingError error, CancellationToken cancellationToken)
+    public async Task<IssueRecordResult> Record(TrackingError error, CancellationToken cancellationToken, bool enforceQuota = false)
     {
         await using var connection = db.Connection;
+        await connection.OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var parameters = new { error.AppId, error.IsDebug, eventId = Guid.Parse(error.ErrorId) };
+        var inserted = await connection.ExecuteScalarAsync<int>(new CommandDefinition("""
+            INSERT INTO error_receipts (app_id, is_debug, event_id)
+            SELECT a.id, @IsDebug, @eventId FROM apps a JOIN users u ON u.id = a.owner_id
+            WHERE a.id = @AppId AND a.deleted_at IS NULL AND u.lock_reason IS NULL
+            ON CONFLICT DO NOTHING RETURNING 1
+            """, parameters, transaction, cancellationToken: cancellationToken));
+        if (inserted == 0)
+        {
+            var duplicate = await connection.ExecuteScalarAsync<bool>(new CommandDefinition("""
+                SELECT EXISTS (SELECT 1 FROM error_receipts r JOIN apps a ON a.id = r.app_id
+                    JOIN users u ON u.id = a.owner_id
+                    WHERE r.app_id = @AppId AND r.is_debug = @IsDebug AND r.event_id = @eventId
+                    AND a.deleted_at IS NULL AND u.lock_reason IS NULL)
+                """, parameters, transaction, cancellationToken: cancellationToken));
+            return duplicate ? IssueRecordResult.Duplicate : IssueRecordResult.AppUnavailable;
+        }
+
+        if (enforceQuota)
+        {
+            var consumed = await connection.ExecuteScalarAsync<int>(new CommandDefinition("""
+                UPDATE apps SET error_count = error_count + 1
+                WHERE id = @AppId AND error_count < error_quota RETURNING 1
+                """, parameters, transaction, cancellationToken: cancellationToken));
+            if (consumed == 0) return IssueRecordResult.QuotaExceeded;
+        }
+
         await connection.ExecuteAsync(new CommandDefinition("""
             INSERT INTO error_issues (app_id, is_debug, id, error_type, error_message, stack_trace, first_seen, last_seen)
-            SELECT @AppId, @IsDebug, @id, @ErrorType, @ErrorMessage, @stack, @Timestamp, @Timestamp
-            FROM apps WHERE id = @AppId AND deleted_at IS NULL
+            VALUES (@AppId, @IsDebug, @id, @ErrorType, @ErrorMessage, @stack, @Timestamp, @Timestamp)
             ON CONFLICT (app_id, is_debug, id) DO UPDATE SET
                 occurrence_count = error_issues.occurrence_count + 1,
                 first_seen = LEAST(error_issues.first_seen, EXCLUDED.first_seen),
-                last_seen = GREATEST(error_issues.last_seen, EXCLUDED.last_seen)
+                last_seen = GREATEST(error_issues.last_seen, EXCLUDED.last_seen),
+                status = CASE WHEN EXCLUDED.last_seen > error_issues.resolved_at THEN 'unresolved' ELSE error_issues.status END,
+                resolved_at = CASE WHEN EXCLUDED.last_seen > error_issues.resolved_at THEN NULL ELSE error_issues.resolved_at END
             """, new { error.AppId, error.IsDebug,
                 id = IssueFingerprint.Create(error.ErrorType, error.ErrorMessage, error.StackTrace),
                 error.ErrorType, error.ErrorMessage, stack = error.StackTrace ?? "", error.Timestamp },
-            cancellationToken: cancellationToken));
+            transaction, cancellationToken: cancellationToken));
+        await transaction.CommitAsync(cancellationToken);
+        return IssueRecordResult.Accepted;
+    }
+
+    public async Task<int> PurgeExpiredReceipts(CancellationToken cancellationToken)
+    {
+        await using var connection = db.Connection;
+        return await connection.ExecuteAsync(new CommandDefinition("""
+            DELETE FROM error_receipts WHERE (app_id, is_debug, event_id) IN (
+                SELECT app_id, is_debug, event_id FROM error_receipts
+                WHERE received_at < CURRENT_TIMESTAMP - INTERVAL '30 days'
+                ORDER BY received_at LIMIT 10000 FOR UPDATE SKIP LOCKED)
+            """, cancellationToken: cancellationToken));
     }
 
     public async Task<IssueAccess> GetAccess(string appId, UserIdentity user, CancellationToken cancellationToken)
@@ -62,7 +108,7 @@ public class IssueStore(IDbContext db) : IIssueStore
             ?? new IssueAccess(false, false);
     }
 
-    public async Task<IssuePage> List(string appId, bool isDebug, string status, int offset, int limit, CancellationToken cancellationToken)
+    public async Task<IssuePage> List(string appId, bool isDebug, string status, int offset, int limit, CancellationToken cancellationToken, string q = "")
     {
         await using var connection = db.Connection;
         await connection.OpenAsync(cancellationToken);
@@ -70,10 +116,12 @@ public class IssueStore(IDbContext db) : IIssueStore
         using var result = await connection.QueryMultipleAsync(new CommandDefinition("""
             SELECT * FROM error_issues WHERE app_id = @appId AND is_debug = @isDebug
                 AND (@status = 'all' OR status = @status)
+                AND (@q = '' OR strpos(lower(error_type), lower(@q)) > 0 OR strpos(lower(error_message), lower(@q)) > 0)
                 ORDER BY last_seen DESC, id LIMIT @limit OFFSET @offset;
             SELECT COUNT(*) FROM error_issues WHERE app_id = @appId AND is_debug = @isDebug
-                AND (@status = 'all' OR status = @status);
-            """, new { appId, isDebug, status, offset, limit }, transaction, cancellationToken: cancellationToken));
+                AND (@status = 'all' OR status = @status)
+                AND (@q = '' OR strpos(lower(error_type), lower(@q)) > 0 OR strpos(lower(error_message), lower(@q)) > 0);
+            """, new { appId, isDebug, status, offset, limit, q }, transaction, cancellationToken: cancellationToken));
         var issues = (await result.ReadAsync<Issue>()).ToArray();
         var total = await result.ReadSingleAsync<long>();
         await transaction.CommitAsync(cancellationToken);

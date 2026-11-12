@@ -9,6 +9,7 @@ public class ErrorBody
     private static readonly string[] KnownSeverities = new[] { "fatal", "error" };
     private static readonly string[] KnownKinds = new[] { "crash", "unhandled", "taskException", "handled" };
 
+    public string? EventId { get; set; }
     public string? ErrorMessage { get; set; }
     public string? ErrorType { get; set; }
     public string? StackTrace { get; set; }
@@ -26,6 +27,10 @@ public class ErrorBody
 
     public bool IsValid()
     {
+        if (EventId is not null &&
+            (!(Guid.TryParseExact(EventId, "D", out var id) || Guid.TryParseExact(EventId, "N", out id)) || id == Guid.Empty))
+            return false;
+
         if (string.IsNullOrWhiteSpace(ErrorMessage))
             return false;
 

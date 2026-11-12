@@ -6,7 +6,6 @@ using Aptabase.Features.Stats;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
-using Microsoft.Extensions.Caching.Memory;
 
 namespace Aptabase.Features.ErrorReporting;
 
@@ -14,18 +13,12 @@ namespace Aptabase.Features.ErrorReporting;
 [ResponseCache(NoStore = true)]
 public class ErrorsController : ControllerBase
 {
-    // How long an app stays in the "quota exhausted" fast path before we re-check Postgres.
-    // Trade-off: after a mid-month quota raise or the monthly reset, error ingestion for an
-    // exhausted app can keep getting rejected for up to this duration.
-    private static readonly TimeSpan QuotaExhaustedCacheDuration = TimeSpan.FromMinutes(5);
-
     private readonly IIssueStore _issues;
     private readonly IErrorBuffer _buffer;
     private readonly IPiiSanitizer _piiSanitizer;
     private readonly IErrorQueryClient _errorQueryClient;
     private readonly IDbContext _db;
     private readonly EnvSettings _env;
-    private readonly IMemoryCache _memoryCache;
     private readonly ILogger<ErrorsController> _logger;
 
     public ErrorsController(
@@ -35,7 +28,6 @@ public class ErrorsController : ControllerBase
         IErrorQueryClient errorQueryClient,
         IDbContext db,
         EnvSettings env,
-        IMemoryCache memoryCache,
         ILogger<ErrorsController> logger)
     {
         _buffer = buffer;
@@ -44,7 +36,6 @@ public class ErrorsController : ControllerBase
         _errorQueryClient = errorQueryClient;
         _db = db;
         _env = env;
-        _memoryCache = memoryCache;
         _logger = logger;
     }
 
@@ -70,39 +61,7 @@ public class ErrorsController : ControllerBase
         // Missing, unknown and locked App-Keys were already rejected by ResolveErrorAppKey, before the body was parsed
         var app = ResolveAppKeyAttribute.GetApp(HttpContext);
 
-        // Enforce the per-app error quota (atomically increments the counter).
-        // Disabled by default; enable via ERROR_QUOTA_ENABLED once quota tiers are finalized.
-        //
-        // Exhaustion returns 403, NOT 429: deployed SDKs (e.g. aptabase-maui) treat 429 as
-        // retryable and would re-send the same queued error every 30 seconds until the monthly
-        // reset, while any other 4xx is logged and dropped client-side. 403 makes SDKs drop the
-        // report (matching how billing overuse locks are handled), and 429 stays reserved for
-        // the per-IP rate limiter, where retrying IS appropriate.
-        if (_env.ErrorQuotaEnabled)
-        {
-            // Short-TTL "quota exhausted" cache: once the quota is known to be gone, a
-            // crash-storming fleet shouldn't cost one Postgres UPDATE attempt per rejected
-            // request. See QuotaExhaustedCacheDuration for the staleness trade-off.
-            var quotaCacheKey = $"ERROR-QUOTA-EXHAUSTED-{app.Id}";
-            if (_memoryCache.TryGetValue(quotaCacheKey, out _))
-            {
-                // Debug (not Warning) to avoid log spam: the first detection below already
-                // logged a Warning for this app within the last few minutes.
-                _logger.LogDebug("Error rejected: App {AppId} exceeded its error quota (cached)", app.Id);
-                return StatusCode(403, new { error = "Error quota exceeded" });
-            }
-
-            var withinQuota = await _db.TryConsumeErrorQuota(app.Id, cancellationToken);
-            if (!withinQuota)
-            {
-                _memoryCache.Set(quotaCacheKey, true, QuotaExhaustedCacheDuration);
-                _logger.LogWarning("Error rejected: App {AppId} exceeded its error quota", app.Id);
-                return StatusCode(403, new { error = "Error quota exceeded" });
-            }
-        }
-
-        // Generate error ID
-        var errorId = Guid.NewGuid().ToString();
+        var errorId = body.EventId is null ? Guid.NewGuid().ToString() : Guid.Parse(body.EventId).ToString();
 
         // Sanitize PII from error message and stack trace
         var sanitizedErrorMessage = _piiSanitizer.Sanitize(body.ErrorMessage);
@@ -128,7 +87,15 @@ public class ErrorsController : ControllerBase
             IsDebug = body.IsDebug
         };
 
-        await _issues.Record(trackingError, cancellationToken);
+        var result = await _issues.Record(trackingError, cancellationToken, _env.ErrorQuotaEnabled);
+        if (result == IssueRecordResult.Duplicate) return Accepted();
+        if (result == IssueRecordResult.AppUnavailable) return BadRequest(new { error = "App is unavailable" });
+        if (result == IssueRecordResult.QuotaExceeded)
+        {
+            // Existing SDKs drop 403 but retry 429, which is reserved for the rate limiter.
+            _logger.LogDebug("Error quota exceeded for app {AppId}", app.Id);
+            return StatusCode(403, new { error = "Error quota exceeded" });
+        }
 
         // Add to buffer
         _buffer.Add(ref trackingError);

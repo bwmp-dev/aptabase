@@ -9,18 +9,10 @@ using Aptabase.Features.ErrorReporting.Buffer;
 using Aptabase.Features.Ingestion;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
 namespace Aptabase.UnitTests.Features.ErrorReporting;
 
-// Covers the error-quota gate in ErrorsController.PostError.
-//
-// NOTE: the "quota exhausted on first detection" path (TryConsumeErrorQuota returns false
-// -> 403 + cache entry) is intentionally NOT covered here: TryConsumeErrorQuota is a Dapper
-// static extension over IDbContext.Connection, so forcing it to return false would require
-// mocking the whole ADO.NET command/reader pipeline. It is exercised indirectly via the
-// cache-hit test below (which asserts the 403 shape) and belongs in integration tests.
 public class ErrorsControllerQuotaTests
 {
     private const string AppId = "APP-123";
@@ -30,7 +22,6 @@ public class ErrorsControllerQuotaTests
     private readonly Mock<IPiiSanitizer> _piiSanitizer = new();
     private readonly Mock<IErrorQueryClient> _errorQueryClient = new();
     private readonly Mock<IDbContext> _db = new();
-    private readonly MemoryCache _memoryCache = new(new MemoryCacheOptions());
 
     public ErrorsControllerQuotaTests()
     {
@@ -53,42 +44,27 @@ public class ErrorsControllerQuotaTests
         _db.VerifyNoOtherCalls();
     }
 
-    [Fact]
-    public async Task Should_Return_403_Without_Touching_Database_When_Exhaustion_Is_Cached()
+    [Theory]
+    [InlineData(IssueRecordResult.QuotaExceeded, 403)]
+    [InlineData(IssueRecordResult.AppUnavailable, 400)]
+    public async Task Rejected_Reports_Are_Not_Buffered(IssueRecordResult outcome, int status)
     {
-        _memoryCache.Set($"ERROR-QUOTA-EXHAUSTED-{AppId}", true);
-        var controller = CreateController(errorQuotaEnabled: true);
-
-        var result = await controller.PostError(CreateValidBody(), default);
-
-        var objectResult = result.Should().BeOfType<ObjectResult>().Subject;
-        objectResult.StatusCode.Should().Be(403);
-
-        // Cached exhaustion must short-circuit before the Postgres UPDATE and the buffer
-        _db.VerifyNoOtherCalls();
-        _buffer.Verify(b => b.Add(ref It.Ref<TrackingError>.IsAny), Times.Never());
+        _issues.Setup(s => s.Record(It.IsAny<TrackingError>(), default, true)).ReturnsAsync(outcome);
+        var result = await CreateController(true).PostError(CreateValidBody(), default);
+        Assert.Equal(status, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
+        _buffer.VerifyNoOtherCalls();
     }
 
     [Fact]
-    public async Task Should_Not_Reject_Other_Apps_When_One_App_Is_Exhausted()
+    public async Task Duplicate_Is_Accepted_Without_Buffering_And_Uses_Canonical_Event_Id()
     {
-        _memoryCache.Set("ERROR-QUOTA-EXHAUSTED-SOME-OTHER-APP", true);
-        var controller = CreateController(errorQuotaEnabled: true);
-
-        // This app has no cached exhaustion, so the controller must fall through to the real
-        // quota check (i.e. the other app's cache entry does not short-circuit this app).
-        // Dapper then blows up on the mocked connection, which is irrelevant here: reaching
-        // IDbContext.Connection is exactly the assertion.
-        try
-        {
-            await controller.PostError(CreateValidBody(), default);
-        }
-        catch
-        {
-            // expected: Dapper cannot run against a Moq-provided connection
-        }
-
-        _db.VerifyGet(d => d.Connection, Times.AtLeastOnce());
+        var id = Guid.NewGuid();
+        var body = CreateValidBody();
+        body.EventId = id.ToString("N").ToUpperInvariant();
+        _issues.Setup(s => s.Record(It.IsAny<TrackingError>(), default, true)).ReturnsAsync(IssueRecordResult.Duplicate);
+        Assert.IsType<AcceptedResult>(await CreateController(true).PostError(body, default));
+        _issues.Verify(s => s.Record(It.Is<TrackingError>(e => e.ErrorId == id.ToString()), default, true), Times.Once());
+        _buffer.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -98,14 +74,14 @@ public class ErrorsControllerQuotaTests
         var controller = CreateController(errorQuotaEnabled: false);
         await controller.PostError(CreateValidBody(), default);
         _issues.Verify(s => s.Record(It.Is<TrackingError>(e => e.AppId == AppId &&
-            e.ErrorType == "redacted" && e.ErrorMessage == "redacted" && e.StackTrace == "redacted"), default), Times.Once());
+            e.ErrorType == "redacted" && e.ErrorMessage == "redacted" && e.StackTrace == "redacted"), default, false), Times.Once());
         _buffer.Verify(b => b.Add(ref It.Ref<TrackingError>.IsAny), Times.Once());
     }
 
     [Fact]
     public async Task Does_Not_Accept_Or_Buffer_When_Issue_Persistence_Fails()
     {
-        _issues.Setup(s => s.Record(It.IsAny<TrackingError>(), default)).ThrowsAsync(new InvalidOperationException("database unavailable"));
+        _issues.Setup(s => s.Record(It.IsAny<TrackingError>(), default, false)).ThrowsAsync(new InvalidOperationException("database unavailable"));
         await Assert.ThrowsAsync<InvalidOperationException>(() => CreateController(false).PostError(CreateValidBody(), default));
         _buffer.Verify(b => b.Add(ref It.Ref<TrackingError>.IsAny), Times.Never());
     }
@@ -129,7 +105,6 @@ public class ErrorsControllerQuotaTests
             _errorQueryClient.Object,
             _db.Object,
             CreateEnvSettings(errorQuotaEnabled),
-            _memoryCache,
             Mock.Of<ILogger<ErrorsController>>())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }

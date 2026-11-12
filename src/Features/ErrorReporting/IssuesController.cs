@@ -18,13 +18,14 @@ public class IssuesController(IIssueStore store) : ControllerBase
     [HttpGet]
     public async Task<IActionResult> List(string appId, [FromQuery] string buildMode = "release",
         [FromQuery] string status = "unresolved", [FromQuery] int offset = 0, [FromQuery] int limit = 50,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, [FromQuery] string? q = null)
     {
         var access = await store.GetAccess(appId, HttpContext.GetCurrentUserIdentity(), cancellationToken);
         if (!access.CanRead) return StatusCode(403);
-        if (!ValidMode(buildMode) || status is not ("all" or "resolved" or "unresolved") || offset < 0 || limit < 1 || limit > 100)
+        q = q?.Trim() ?? "";
+        if (q.Length > 200 || !ValidMode(buildMode) || status is not ("all" or "resolved" or "unresolved") || offset < 0 || limit < 1 || limit > 100)
             return BadRequest(new { error = "Invalid issue query" });
-        var page = await store.List(appId, buildMode == "debug", status, offset, limit, cancellationToken);
+        var page = await store.List(appId, buildMode == "debug", status, offset, limit, cancellationToken, q);
         return Ok(new { issues = page.Issues, pagination = new { offset, limit, total = page.Total }, canManage = access.CanManage });
     }
 
