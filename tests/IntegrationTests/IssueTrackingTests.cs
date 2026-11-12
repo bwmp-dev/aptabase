@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Aptabase.Data;
 using Aptabase.Features.Authentication;
 using Aptabase.Features.ErrorReporting;
+using Aptabase.Features.Performance;
 using Aptabase.Features.ErrorReporting.Buffer;
 using Dapper;
 using FluentMigrator.Runner;
@@ -107,6 +108,9 @@ public class IssueTrackingTests
             var builder = WebApplication.CreateBuilder();
             builder.WebHost.UseTestServer();
             builder.Services.AddSingleton<IIssueStore>(store);
+            builder.Services.AddSingleton<IPiiSanitizer, PiiSanitizer>();
+            builder.Services.AddSingleton<IDbContext>(db);
+            builder.Services.AddSingleton<PerformanceStore>();
             builder.Services.AddControllers().AddApplicationPart(typeof(IssuesController).Assembly);
             builder.Services.AddRateLimiter(options => options.AddFixedWindowLimiter("Stats", limiter =>
             {
@@ -120,6 +124,10 @@ public class IssueTrackingTests
             {
                 if (context.Request.Headers.ContainsKey("Test-Owner"))
                     context.User = Controller(owner).HttpContext.User;
+                else if (context.Request.Headers.ContainsKey("Test-Reader"))
+                    context.User = Controller(reader).HttpContext.User;
+                else if (context.Request.Headers.ContainsKey("Test-Stranger"))
+                    context.User = Controller(stranger).HttpContext.User;
                 await next(context);
             });
             app.MapControllers();
@@ -138,6 +146,26 @@ public class IssueTrackingTests
             Assert.Equal(HttpStatusCode.BadRequest, (await http.PatchAsJsonAsync(route, new { status = "invalid" })).StatusCode);
             Assert.Equal(HttpStatusCode.BadRequest, (await http.GetAsync("/api/v0/apps/issue-app-a/issues?limit=invalid")).StatusCode);
             Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync("/api/v0/apps/issue-app-a/issues/missing")).StatusCode);
+            var performance = app.Services.GetRequiredService<PerformanceStore>();
+            var eventId = Guid.NewGuid();
+            await performance.Record("issue-app-a", new TransactionBody {
+                EventId = eventId.ToString(), Timestamp = DateTime.UtcNow, Name = "app.startup", Operation = "ui.load", DurationMs = 100
+            }, default);
+            var transactionRoute = $"/api/v0/apps/issue-app-a/transactions/{eventId}";
+            Assert.Equal(HttpStatusCode.OK, (await http.GetAsync(transactionRoute)).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await http.GetAsync("/api/v0/apps/issue-app-a/transactions")).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await http.GetAsync("/api/v0/apps/issue-app-a/performance/summary")).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await http.GetAsync("/api/v0/apps/issue-app-a/transactions?limit=101")).StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync(transactionRoute + "?buildMode=debug")).StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync($"/api/v0/apps/issue-app-b/transactions/{eventId}")).StatusCode);
+            http.DefaultRequestHeaders.Remove("Test-Owner");
+            Assert.Equal(HttpStatusCode.Unauthorized, (await http.GetAsync(transactionRoute)).StatusCode);
+            http.DefaultRequestHeaders.Add("Test-Stranger", "true");
+            Assert.Equal(HttpStatusCode.Forbidden, (await http.GetAsync(transactionRoute)).StatusCode);
+            http.DefaultRequestHeaders.Remove("Test-Stranger");
+            http.DefaultRequestHeaders.Add("Test-Reader", "true");
+            Assert.Equal(HttpStatusCode.OK, (await http.GetAsync(transactionRoute)).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await http.GetAsync("/api/v0/apps/issue-app-b/performance/summary")).StatusCode);
             await app.StopAsync();
             await connection.ExecuteAsync("UPDATE apps SET deleted_at = CURRENT_TIMESTAMP WHERE id = 'issue-app-a'");
             Assert.False((await store.GetAccess("issue-app-a", owner, default)).CanRead);

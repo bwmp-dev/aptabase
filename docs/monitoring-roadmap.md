@@ -57,8 +57,8 @@ The fork's LICENSE and attribution remain unchanged. Any future copied source re
 - [ ] Acceptance: retries do not generate duplicate notifications, revoked ownership cannot modify rules, disabled rules cannot send.
 
 ### 6. App performance and instrumentation (priority after reliability/context)
-- [ ] Bounded sampled transaction/span ingestion for desktop/mobile operations (startup, navigation, rendering, local work and app network calls); no automatic unsampled collection.
-- [ ] Self-hosted PostgreSQL storage first, with 30-day event retention and indexed app/build/time queries. Preserve existing ClickHouse/Tinybird analytics unchanged. Reassess storage against measured volume before claiming scale.
+- [x] Bounded sampled transaction/span ingestion for desktop/mobile operations (startup, navigation, rendering, local work and app network calls); no automatic unsampled collection.
+- [x] Self-hosted PostgreSQL storage first, with 30-day event retention and indexed app/build/time queries. Preserve existing ClickHouse/Tinybird analytics unchanged. Reassess storage against measured volume before claiming scale.
 - [ ] App-scoped latency summaries (count, errors, p50/p95) and transaction/span details, filtered by environment/release/time. Never collect request payloads, user identifiers or full URLs by default.
 - [ ] Acceptance: duration/span/count/name bounds, retry deduplication, malformed parent relationships, tenant access and percentile fixtures tested.
 - [ ] Desktop/mobile instrumentation docs and examples explaining stable operation names, sampling, monotonic durations, offline retry IDs and privacy boundaries.
@@ -92,3 +92,10 @@ Baseline: 232 backend unit tests and one PostgreSQL/HTTP scenario passed; 14 fro
 - CI test job now supplies its own PostgreSQL connection for isolated monitoring tests. No workflow was run remotely.
 - 30-day receipt retention stores only event UUID/app/build/reception time; cleanup is bounded to 10,000 rows per five minutes. Issue summaries retain lifetime counts.
 - Existing NuGet security warnings remain. Frontend/headless checks for this increment are pending.
+
+### App performance backend increment
+
+- Implemented native transaction/span HTTP ingestion, per-app/build retry identity, bounded names/spans/durations and parent-tree validation, sanitized labels, 30-day batched retention, scoped list/detail and p50/p95 aggregates.
+- Passed: 248 backend unit tests and both expanded isolated PostgreSQL/HTTP scenarios. Performance ingestion deduplication, sanitizer, release filters, percentile fixture (100/200 ms => p50 150/p95 195), retention, HTTP read authorization and debug isolation verified.
+- A recurrence assertion initially depended on Docker/Windows clock agreement. The fixture now uses an explicit past resolution boundary; rerun passed. Production policy still compares normalized client event time to database resolution time, so clocks should be synchronized.
+- Contract and desktop/mobile instrumentation guidance: `docs/app-performance-api.md`. Frontend implementation delegated to Opus; not yet accepted. No performance load/scale claim.

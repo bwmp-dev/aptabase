@@ -5,6 +5,7 @@ using Aptabase.Features.Apps;
 using Aptabase.Features.ErrorReporting;
 using Aptabase.Features.ErrorReporting.Buffer;
 using Aptabase.Features.Ingestion;
+using Aptabase.Features.Performance;
 using Aptabase.Features.Stats;
 using Dapper;
 using FluentMigrator.Runner;
@@ -52,6 +53,7 @@ public class IssueIngestionTests
             builder.Services.AddSingleton(env);
             builder.Services.AddSingleton<IDbContext>(db);
             builder.Services.AddSingleton<IIssueStore>(store);
+            builder.Services.AddSingleton<PerformanceStore>();
             builder.Services.AddSingleton<IErrorBuffer>(buffer);
             builder.Services.AddSingleton<IPiiSanitizer, PiiSanitizer>();
             builder.Services.AddSingleton<IAppQueries, AppQueries>();
@@ -96,6 +98,9 @@ public class IssueIngestionTests
             Assert.Equal("Failed for [EMAIL_REDACTED]", issue.ErrorMessage);
             Assert.Equal(1, issue.OccurrenceCount);
             var resolved = await store.SetStatus("app-a", false, issue.Id, "resolved", "owner", default);
+            // Use a fixed past boundary; Docker's database clock can differ from the Windows host clock.
+            resolved!.ResolvedAt = DateTime.UtcNow.AddMinutes(-1);
+            await connection.ExecuteAsync("UPDATE error_issues SET resolved_at = @at WHERE app_id = 'app-a'", new { at = resolved.ResolvedAt });
             Assert.Equal(HttpStatusCode.Accepted, (await http.PostAsJsonAsync("/api/v0/error", Body(eventId))).StatusCode);
             Assert.Equal("resolved", (await store.Get("app-a", false, issue.Id, default))!.Status);
             await connection.ExecuteAsync("UPDATE apps SET error_quota = 100 WHERE id = 'app-a'");
@@ -129,6 +134,36 @@ public class IssueIngestionTests
             Assert.Equal(2, await store.PurgeExpiredReceipts(default));
             Assert.Equal(IssueRecordResult.Accepted, await store.Record(retryable, default, true));
             Assert.True(await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts WHERE app_id = 'app-a'") > 0);
+            var performance = app.Services.GetRequiredService<PerformanceStore>();
+            var transactionId = Guid.NewGuid().ToString();
+            TransactionBody Transaction(double duration = 100) => new() {
+                EventId = transactionId, Name = "app.startup", Operation = "ui.load", DurationMs = duration,
+                Timestamp = DateTime.UtcNow, Release = "1.2.0", Environment = "production", Platform = "desktop",
+                Spans = new() { new() { SpanId = "1111111111111111", Name = "read owner@example.test", Operation = "file.read", DurationMs = 20 } }
+            };
+            var transactionReplies = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => http.PostAsJsonAsync("/api/v0/transaction", Transaction())));
+            Assert.All(transactionReplies, reply => Assert.Equal(HttpStatusCode.Accepted, reply.StatusCode));
+            var perfFilter = new PerformanceFilter("app-b", false, DateTime.UtcNow.AddDays(-1), DateTime.UtcNow, "production", "1.2.0", null, null);
+            Assert.Equal(1, (await performance.List(perfFilter, 0, 50, default)).Total);
+            var detail = await performance.Get("app-b", false, Guid.Parse(transactionId), default);
+            Assert.Equal("read [EMAIL_REDACTED]", Assert.Single(detail!.Spans).Name);
+            Assert.Null(await performance.Get("app-a", false, Guid.Parse(transactionId), default));
+            Assert.Null(await performance.Get("app-b", true, Guid.Parse(transactionId), default));
+            transactionId = Guid.NewGuid().ToString();
+            var second = Transaction(200); second.Status = "error";
+            Assert.Equal(HttpStatusCode.Accepted, (await http.PostAsJsonAsync("/api/v0/transaction", second)).StatusCode);
+            perfFilter = perfFilter with { EndDate = DateTime.UtcNow };
+            var group = Assert.Single(await performance.Summary(perfFilter, default));
+            Assert.Equal(2, group.Count);
+            Assert.Equal(1, group.ErrorCount);
+            Assert.Equal(150, group.P50Ms);
+            Assert.Equal(195, group.P95Ms);
+            Assert.Equal(150, group.AvgMs);
+            Assert.Empty(await performance.Summary(perfFilter with { Release = "no-match" }, default));
+            Assert.Equal(HttpStatusCode.BadRequest, (await http.PostAsJsonAsync("/api/v0/transaction", Transaction(-1))).StatusCode);
+            await connection.ExecuteAsync("UPDATE app_transactions SET received_at = CURRENT_TIMESTAMP - INTERVAL '31 days'");
+            Assert.Equal(2, await performance.Purge(default));
+            Assert.Equal(0, (await performance.List(perfFilter, 0, 50, default)).Total);
             await app.StopAsync();
         }
         finally
