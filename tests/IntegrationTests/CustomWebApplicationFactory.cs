@@ -10,11 +10,11 @@ public class CustomWebApplicationFactory<TProgram>
         Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
         Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", "Development");
         Environment.SetEnvironmentVariable("BASE_URL", "http://localhost:3000");
-        Environment.SetEnvironmentVariable("DATABASE_URL", "Server=localhost;Port=5432;User Id=aptabase;Password=aptabase_pw;Database=aptabase");
-        Environment.SetEnvironmentVariable("CLICKHOUSE_URL", "Host=localhost;Port=8123;Username=aptabase;Password=aptabase_pw");
+        Environment.SetEnvironmentVariable("DATABASE_URL", Environment.GetEnvironmentVariable("APTABASE_TEST_DATABASE_URL") ?? "Server=localhost;Port=5432;User Id=aptabase;Password=aptabase_pw;Database=aptabase");
+        Environment.SetEnvironmentVariable("CLICKHOUSE_URL", Environment.GetEnvironmentVariable("APTABASE_TEST_CLICKHOUSE_URL") ?? "Host=localhost;Port=8123;Username=aptabase;Password=aptabase_pw");
         Environment.SetEnvironmentVariable("AUTH_SECRET", "qjrp73j3lm3ypZgR07sC9XfviHFP9CensnwEJouYEZw=");
         Environment.SetEnvironmentVariable("SMTP_HOST", "localhost");
-        Environment.SetEnvironmentVariable("SMTP_PORT", "1025");
+        Environment.SetEnvironmentVariable("SMTP_PORT", Environment.GetEnvironmentVariable("APTABASE_TEST_SMTP_PORT") ?? "1025");
         Environment.SetEnvironmentVariable("SMTP_FROM_ADDRESS", "abc@hi.com");
     }
 }

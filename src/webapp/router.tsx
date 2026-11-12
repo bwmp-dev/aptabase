@@ -58,6 +58,14 @@ const router = createBrowserRouter([
         lazy: () => import("./features/analytics/ErrorsPage"),
       },
       {
+        path: "/:id/performance",
+        lazy: () => import("./features/performance/PerformancePage"),
+      },
+      {
+        path: "/:id/releases",
+        lazy: () => import("./features/releases/ReleasesPage"),
+      },
+      {
         path: "/:id/instructions",
         lazy: () => import("./features/apps/InstructionsPage"),
       },

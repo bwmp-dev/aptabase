@@ -2,36 +2,53 @@ import { Button } from "@components/Button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@components/Dialog";
 import { LoadingState } from "@components/LoadingState";
 import { BuildMode } from "@features/apps";
+import { ReleaseFilter } from "@features/releases/releases";
+import { httpStatus, retryServerErrors } from "@fns/fetch-json";
 import { IconAlertTriangle, IconCheck, IconCopy } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { IssueOccurrences } from "./IssueOccurrences";
 import { IssueStatusBadge } from "./IssueStatusBadge";
-import { Issue, IssueRequestError, IssueStatus, fetchIssue, issueKeys, updateIssueStatus } from "./issues";
+import { Issue, IssueStatus, fetchIssue, issueKeys, updateIssueStatus } from "./issues";
 
 type Props = {
   appId: string;
   buildMode: BuildMode;
   issueId: string | null;
+  releaseFilter: ReleaseFilter;
   onClose: () => void;
+  returnFocusTo: HTMLElement | null;
 };
 
-export function IssueDetailModal({ appId, buildMode, issueId, onClose }: Props) {
+export function IssueDetailModal({ appId, buildMode, issueId, releaseFilter, onClose, returnFocusTo }: Props) {
+  // Without a Radix trigger, closing would leave focus on the body; return it to the opener when it still exists.
+  const restoreFocus = (event: Event) => {
+    if (returnFocusTo?.isConnected) {
+      event.preventDefault();
+      returnFocusTo.focus();
+    }
+  };
+
   return (
     <Dialog open={issueId !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-        {issueId && <IssueDetail key={issueId} appId={appId} buildMode={buildMode} issueId={issueId} />}
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" onCloseAutoFocus={restoreFocus}>
+        {issueId && (
+          <IssueDetail
+            key={issueId}
+            appId={appId}
+            buildMode={buildMode}
+            issueId={issueId}
+            releaseFilter={releaseFilter}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );
 }
 
-function errorStatus(error: unknown) {
-  return error instanceof IssueRequestError ? error.status : undefined;
-}
-
 function loadErrorMessage(error: unknown) {
-  switch (errorStatus(error)) {
+  switch (httpStatus(error)) {
     case 404:
       return "This issue no longer exists.";
     case 403:
@@ -42,7 +59,7 @@ function loadErrorMessage(error: unknown) {
 }
 
 function updateErrorMessage(error: unknown) {
-  switch (errorStatus(error)) {
+  switch (httpStatus(error)) {
     case 404:
       return "This issue no longer exists.";
     case 403:
@@ -56,16 +73,14 @@ type DetailProps = {
   appId: string;
   buildMode: BuildMode;
   issueId: string;
+  releaseFilter: ReleaseFilter;
 };
 
-function IssueDetail({ appId, buildMode, issueId }: DetailProps) {
+function IssueDetail({ appId, buildMode, issueId, releaseFilter }: DetailProps) {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: issueKeys.detail(appId, buildMode, issueId),
     queryFn: () => fetchIssue(appId, buildMode, issueId),
-    retry: (failureCount, err) => {
-      const status = errorStatus(err);
-      return (status === undefined || status >= 500) && failureCount < 2;
-    },
+    retry: retryServerErrors,
   });
 
   if (isLoading) {
@@ -83,7 +98,7 @@ function IssueDetail({ appId, buildMode, issueId }: DetailProps) {
   }
 
   if (isError || !data) {
-    const canRetry = errorStatus(error) !== 404 && errorStatus(error) !== 403;
+    const canRetry = httpStatus(error) !== 404 && httpStatus(error) !== 403;
     return (
       <>
         <DialogHeader>
@@ -129,19 +144,21 @@ function IssueDetail({ appId, buildMode, issueId }: DetailProps) {
       </section>
 
       {issue.stackTrace && <StackTrace stackTrace={issue.stackTrace} />}
+
+      <IssueOccurrences appId={appId} buildMode={buildMode} issueId={issue.id} filter={releaseFilter} />
     </>
   );
 }
 
 const statusActions: Record<IssueStatus, { hint: string; next: IssueStatus; label: string; pendingLabel: string }> = {
   unresolved: {
-    hint: "Resolve this issue once it is fixed. New occurrences are still counted, but it stays resolved until reopened.",
+    hint: "Resolve this issue once it is fixed. It reopens automatically if the error occurs again afterwards.",
     next: "resolved",
     label: "Resolve issue",
     pendingLabel: "Resolving…",
   },
   resolved: {
-    hint: "This issue stays resolved even if the error happens again. Reopen it to track it as unresolved.",
+    hint: "This issue reopens automatically if the error occurs again after it was resolved. Delayed reports of earlier occurrences and retried deliveries don't reopen it. You can also reopen it yourself.",
     next: "unresolved",
     label: "Reopen issue",
     pendingLabel: "Reopening…",

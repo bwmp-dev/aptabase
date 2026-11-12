@@ -13,7 +13,7 @@ export function BuildModeSelector() {
 
   return (
     <Popover>
-      <PopoverTrigger className="relative">
+      <PopoverTrigger className="relative" aria-label={`Build mode: ${buildMode}`}>
         {buildMode === "release" ? (
           <IconRocket className="h-5 w-5 mb-2" stroke="1" />
         ) : (

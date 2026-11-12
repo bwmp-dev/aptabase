@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Issue } from "./issues";
+import type { Issue, IssueEvent } from "./issues";
 
 let buildMode = "release";
 
@@ -16,6 +16,39 @@ type Handler = (url: URL, init?: RequestInit) => Reply;
 
 const fetchMock = vi.fn();
 let handler: Handler;
+let eventsHandler: Handler;
+
+const releasesReply = {
+  status: 200,
+  body: {
+    releases: [
+      { release: "2.0.0", environment: "production", errorCount: 4, transactionCount: 0, firstSeen: "", lastSeen: "" },
+      { release: "1.9.0", environment: "staging", errorCount: 1, transactionCount: 0, firstSeen: "", lastSeen: "" },
+    ],
+  },
+};
+
+function event(overrides: Partial<IssueEvent> = {}): IssueEvent {
+  return {
+    eventId: "7d0d1f5e-7c1e-4c31-9a39-62b3f6f0c001",
+    timestamp: "2026-11-10T09:00:00Z",
+    errorMessage: "Cannot read properties of undefined (reading 'x')",
+    stackTrace: "at occurrence (app.js:9:9)",
+    release: "2.0.0",
+    environment: "production",
+    platform: "desktop",
+    osName: "Windows",
+    osVersion: "11",
+    sdkVersion: "aptabase-dotnet@1.0.0",
+    severity: "fatal",
+    kind: "crash",
+    ...overrides,
+  };
+}
+
+function eventsReply(events: IssueEvent[], total = events.length) {
+  return { status: 200, body: { events, pagination: { offset: 0, limit: 10, total } } };
+}
 
 function issue(overrides: Partial<Issue> = {}): Issue {
   return {
@@ -56,6 +89,20 @@ function listRequests() {
     .map((c) => Object.fromEntries(c.url.searchParams));
 }
 
+function searchBox() {
+  return screen.getByRole("searchbox", { name: "Search issues" }) as HTMLInputElement;
+}
+
+function search(value: string) {
+  fireEvent.change(searchBox(), { target: { value } });
+}
+
+async function clickNext() {
+  const next = (await screen.findByRole("button", { name: /Next/ })) as HTMLButtonElement;
+  await waitFor(() => expect(next.disabled).toBe(false));
+  fireEvent.click(next);
+}
+
 function renderPanel(appId = "a1") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const ui = () => (
@@ -69,9 +116,15 @@ function renderPanel(appId = "a1") {
 
 beforeEach(() => {
   buildMode = "release";
+  eventsHandler = () => eventsReply([event()]);
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (input: string, init?: RequestInit) => {
-    const reply = await handler(new URL(input, "http://localhost"), init);
+    const url = new URL(input, "http://localhost");
+    const reply = url.pathname.endsWith("/releases")
+      ? releasesReply
+      : url.pathname.endsWith("/events")
+      ? await eventsHandler(url, init)
+      : await handler(url, init);
     return { ok: reply.status >= 200 && reply.status < 300, status: reply.status, json: async () => reply.body };
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -105,7 +158,7 @@ describe("IssuesPanel list", () => {
     handler = () => listReply([issue()], { total: 120 });
     renderPanel();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Next/ }));
+    await clickNext();
     await waitFor(() => expect(listRequests().at(-1)?.offset).toBe("50"));
 
     fireEvent.click(screen.getByRole("button", { name: "Resolved" }));
@@ -124,20 +177,21 @@ describe("IssuesPanel list", () => {
     expect(screen.queryByRole("table")).toBeNull();
   });
 
-  it("shows an error with retry when the list fails", async () => {
+  it("retries server failures, then offers a manual retry", async () => {
     let fail = true;
     handler = () => (fail ? { status: 500 } : listReply([issue()]));
     renderPanel();
 
-    const retry = await screen.findByRole("button", { name: "Refresh" });
+    const retry = await screen.findByRole("button", { name: "Refresh" }, { timeout: 6000 });
+    expect(listRequests()).toHaveLength(3);
     fail = false;
     fireEvent.click(retry);
 
     expect(await screen.findByText("TypeError")).toBeTruthy();
-    expect(listRequests()).toHaveLength(2);
-  });
+    expect(listRequests()).toHaveLength(4);
+  }, 10_000);
 
-  it("resets filters, paging and the open issue when the build mode changes", async () => {
+  it("resets filters, search, paging and the open issue when the build mode changes", async () => {
     handler = (url) =>
       url.pathname.endsWith("/issues")
         ? listReply([issue()], { total: 120 })
@@ -145,8 +199,12 @@ describe("IssuesPanel list", () => {
     const view = renderPanel();
 
     fireEvent.click(await screen.findByRole("button", { name: "Resolved" }));
-    fireEvent.click(await screen.findByRole("button", { name: /Next/ }));
-    await waitFor(() => expect(listRequests().at(-1)).toMatchObject({ status: "resolved", offset: "50" }));
+    search("TypeError");
+    await waitFor(() => expect(listRequests().at(-1)).toMatchObject({ q: "TypeError" }));
+    await clickNext();
+    await waitFor(() =>
+      expect(listRequests().at(-1)).toMatchObject({ status: "resolved", q: "TypeError", offset: "50" })
+    );
     fireEvent.click(screen.getByRole("button", { name: /TypeError/ }));
     expect(await screen.findByRole("dialog")).toBeTruthy();
 
@@ -158,6 +216,90 @@ describe("IssuesPanel list", () => {
     );
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByRole("button", { name: "Unresolved" }).getAttribute("aria-pressed")).toBe("true");
+    expect(searchBox().value).toBe("");
+  });
+});
+
+describe("IssuesPanel search", () => {
+  it("debounces a trimmed literal query and returns to the first page", async () => {
+    handler = () => listReply([issue()], { total: 120 });
+    renderPanel();
+
+    await clickNext();
+    await waitFor(() => expect(listRequests().at(-1)?.offset).toBe("50"));
+
+    search("  50% off_[x]*  ");
+    expect(listRequests().some((r) => "q" in r)).toBe(false);
+
+    await waitFor(() =>
+      expect(listRequests().at(-1)).toEqual({
+        buildMode: "release",
+        status: "unresolved",
+        offset: "0",
+        limit: "50",
+        q: "50% off_[x]*",
+      })
+    );
+  });
+
+  it("applies the query immediately on submit and keeps it when the status filter changes", async () => {
+    handler = () => listReply([issue()], { total: 120 });
+    renderPanel();
+    await screen.findByText("TypeError");
+
+    search("timeout");
+    fireEvent.submit(screen.getByRole("search"));
+    await waitFor(() => expect(listRequests().at(-1)?.q).toBe("timeout"), { timeout: 200 });
+
+    await clickNext();
+    await waitFor(() => expect(listRequests().at(-1)?.offset).toBe("50"));
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    await waitFor(() => expect(listRequests().at(-1)).toMatchObject({ status: "all", q: "timeout", offset: "0" }));
+  });
+
+  it("does not send whitespace-only searches and limits input to 200 characters", async () => {
+    handler = () => listReply([issue()]);
+    renderPanel();
+    await screen.findByText("TypeError");
+
+    expect(searchBox().maxLength).toBe(200);
+    search("   ");
+    fireEvent.submit(screen.getByRole("search"));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    expect(listRequests()).toHaveLength(1);
+    expect(listRequests().some((r) => "q" in r)).toBe(false);
+  });
+
+  it("explains when nothing matches and clears back to the full list", async () => {
+    handler = (url) => (url.searchParams.has("q") ? listReply([]) : listReply([issue()]));
+    renderPanel();
+    await screen.findByText("TypeError");
+
+    search("nothing here");
+    const status = await screen.findByRole("status");
+    expect(status.textContent).toContain("No unresolved issues match “nothing here”");
+
+    fireEvent.click(within(status).getByRole("button", { name: "Clear search" }));
+
+    expect(await screen.findByText("TypeError")).toBeTruthy();
+    expect(searchBox().value).toBe("");
+    expect(document.activeElement).toBe(searchBox());
+    expect(listRequests().at(-1)).not.toHaveProperty("q");
+  });
+
+  it("explains a rejected search instead of a generic failure", async () => {
+    handler = (url) => (url.searchParams.has("q") ? { status: 400 } : listReply([issue()]));
+    renderPanel();
+    await screen.findByText("TypeError");
+
+    search("bad");
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("This search couldn't be run");
+    expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
+
+    fireEvent.click(within(alert).getByRole("button", { name: "Clear search" }));
+    expect(await screen.findByText("TypeError")).toBeTruthy();
   });
 });
 
@@ -202,6 +344,8 @@ describe("IssuesPanel detail", () => {
     releasePatch();
 
     expect(await within(dialog).findByRole("button", { name: "Reopen issue" })).toBeTruthy();
+    expect(within(dialog).getByText(/reopens automatically if the error occurs again after it was resolved/)).toBeTruthy();
+    expect(within(dialog).getByText(/Delayed reports of earlier occurrences and retried deliveries/)).toBeTruthy();
     await waitFor(() => expect(listRequests().length).toBeGreaterThan(listCountBefore));
   });
 
@@ -253,6 +397,10 @@ describe("IssuesPanel detail", () => {
     expect(await within(dialog).findByText(/Only app owners can resolve or reopen issues/)).toBeTruthy();
     expect(within(dialog).queryByRole("button", { name: /Resolve issue|Reopen issue/ })).toBeNull();
     expect(calls().some((c) => c.init?.method === "PATCH")).toBe(false);
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /TypeError/ }));
   });
 
   it("explains when the issue no longer exists", async () => {
@@ -263,5 +411,82 @@ describe("IssuesPanel detail", () => {
     const dialog = await screen.findByRole("dialog");
     expect((await within(dialog).findByRole("alert")).textContent).toContain("This issue no longer exists.");
     expect(within(dialog).queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+});
+
+describe("IssuesPanel releases and occurrences", () => {
+  function eventRequests() {
+    return calls()
+      .filter((c) => c.url.pathname.endsWith("/events"))
+      .map((c) => Object.fromEntries(c.url.searchParams));
+  }
+
+  it("filters issues by observed release and environment and explains the scope", async () => {
+    handler = () => listReply([issue()], { total: 120 });
+    renderPanel();
+    await clickNext();
+    await waitFor(() => expect(listRequests().at(-1)?.offset).toBe("50"));
+
+    const release = (await screen.findByRole("option", { name: "2.0.0" })).closest("select")!;
+    fireEvent.change(release, { target: { value: "2.0.0" } });
+    fireEvent.change(screen.getByLabelText("Environment"), { target: { value: "staging" } });
+
+    await waitFor(() =>
+      expect(listRequests().at(-1)).toMatchObject({ release: "2.0.0", environment: "staging", offset: "0" })
+    );
+    expect(screen.getByText(/filters match occurrences kept for up to 30 days, depending on app retention/)).toBeTruthy();
+    expect(screen.getByText(/resolving an issue still applies to every release and environment/)).toBeTruthy();
+  });
+
+  it("starts from filters passed in the link", async () => {
+    handler = () => listReply([issue()]);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <IssuesPanel appId="a1" initialFilter={{ release: "1.9.0", environment: "" }} />
+      </QueryClientProvider>
+    );
+
+    await waitFor(() => expect(listRequests().at(-1)).toMatchObject({ release: "1.9.0" }));
+    expect(listRequests().at(-1)).not.toHaveProperty("environment");
+    expect((screen.getByLabelText("Release") as HTMLSelectElement).value).toBe("1.9.0");
+  });
+
+  it("lists recent occurrences with their context, limited to the active filters", async () => {
+    handler = (url) =>
+      url.pathname.endsWith("/issues") ? listReply([issue()]) : { status: 200, body: { issue: issue(), canManage: true } };
+    eventsHandler = () => eventsReply([event(), event({ eventId: "7d0d1f5e-7c1e-4c31-9a39-62b3f6f0c002", release: "" })], 12);
+    renderPanel();
+
+    await screen.findByRole("option", { name: "production" });
+    fireEvent.change(screen.getByLabelText("Environment"), { target: { value: "production" } });
+    await waitFor(() => expect(listRequests().at(-1)).toMatchObject({ environment: "production" }));
+    fireEvent.click(await screen.findByRole("button", { name: /TypeError/ }));
+    const dialog = await screen.findByRole("dialog");
+
+    const occurrences = await within(dialog).findByRole("region", { name: "Recent occurrences" });
+    expect(occurrences.textContent).toContain("limited to environment production");
+    expect(await within(occurrences).findByText(/2\.0\.0 · production · desktop · Windows 11/)).toBeTruthy();
+    expect(occurrences.textContent).toContain("1–10 of 12 retained");
+    expect(eventRequests().at(-1)).toEqual({
+      buildMode: "release",
+      offset: "0",
+      limit: "10",
+      environment: "production",
+    });
+
+    fireEvent.click(within(occurrences).getByRole("button", { name: "Next occurrences" }));
+    await waitFor(() => expect(eventRequests().at(-1)?.offset).toBe("10"));
+  });
+
+  it("explains when no occurrence details are retained", async () => {
+    handler = (url) =>
+      url.pathname.endsWith("/issues") ? listReply([issue()]) : { status: 200, body: { issue: issue(), canManage: false } };
+    eventsHandler = () => eventsReply([]);
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: /TypeError/ }));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText(/No retained occurrences\. Occurrence details are kept for up to 30 days, depending on app retention; raw error logs are kept separately for 180 days\./)).toBeTruthy();
   });
 });

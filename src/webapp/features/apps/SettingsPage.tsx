@@ -1,6 +1,7 @@
 import { Page, PageHeading } from "@components/Page";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@components/Tabs";
 import { useCurrentApp } from "@features/apps";
+import { MonitoringSettingsPanel } from "@features/monitoring/MonitoringSettingsPanel";
 import { Navigate } from "react-router-dom";
 import { AppSharing } from "./AppSharing";
 import { DangerZone } from "./DangerZone";
@@ -18,14 +19,19 @@ export function Component() {
       <PageHeading title="Settings" subtitle="Manage your app settings" />
 
       <Tabs defaultValue="general" className="mt-8">
-        <TabsList>
+        {/* Five tabs don't fit a phone width; the row scrolls instead of widening the page. */}
+        <TabsList className="overflow-x-auto overflow-y-hidden [&>button]:shrink-0 [&>button]:whitespace-nowrap">
           <TabsTrigger value="general">General</TabsTrigger>
+          <TabsTrigger value="monitoring">Monitoring</TabsTrigger>
           <TabsTrigger value="sharing">Sharing</TabsTrigger>
           <TabsTrigger value="ownership">Ownership Transfer</TabsTrigger>
           <TabsTrigger value="danger">Danger Zone</TabsTrigger>
         </TabsList>
         <TabsContent value="general">
           <GeneralSettings app={app} />
+        </TabsContent>
+        <TabsContent value="monitoring">
+          <MonitoringSettingsPanel key={app.id} appId={app.id} />
         </TabsContent>
         <TabsContent value="sharing">
           <AppSharing app={app} />

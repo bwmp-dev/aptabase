@@ -6,9 +6,11 @@ import {
   IconAlertTriangle,
   IconCloudDownload,
   IconCode,
+  IconGauge,
   IconGraph,
   IconLayoutGrid,
   IconSettings,
+  IconTags,
   IconUsers,
 } from "@tabler/icons-react";
 import { useLocation } from "react-router-dom";
@@ -52,6 +54,20 @@ export function NavMenu(props: { onNavigation?: VoidFunction }) {
             disabled={!currentApp || !!currentApp.lockReason}
             href={`/${currentApp?.id}/errors`}
             icon={IconAlertTriangle}
+            onNavigation={props.onNavigation}
+          />
+          <NavItem
+            label="Performance"
+            disabled={!currentApp || !!currentApp.lockReason}
+            href={`/${currentApp?.id}/performance`}
+            icon={IconGauge}
+            onNavigation={props.onNavigation}
+          />
+          <NavItem
+            label="Releases"
+            disabled={!currentApp || !!currentApp.lockReason}
+            href={`/${currentApp?.id}/releases`}
+            icon={IconTags}
             onNavigation={props.onNavigation}
           />
           <NavItem

@@ -1,6 +1,14 @@
 # Instrument desktop/mobile applications
 
-This collector currently offers native JSON error and app-performance endpoints. It is not yet a drop-in Sentry backend. No symbolication, source maps, attachments, crash dumps, session replay or distributed tracing support is implied.
+This collector offers native JSON error/app-performance endpoints and a tested, bounded Sentry envelope subset described in `sentry-compatibility.md`. It is not a universal drop-in Sentry backend. No symbolication, source maps, attachments, crash dumps, session replay or distributed tracing support is implied.
+
+## Collector setup for this fork
+
+Use the repository's existing self-hosted deployment architecture: PostgreSQL plus either ClickHouse or Tinybird, with the built webapp served by the ASP.NET application. Configure `BASE_URL` to the collector's HTTPS origin, `DATABASE_URL`, `AUTH_SECRET` (a unique randomly generated secret, never a published example), and the selected analytics connection. Existing email/OAuth dashboard sign-in configuration still applies. This work does not create external services or configure real email delivery. Do not use the test host or its test-only login endpoints as a deployment.
+
+The normal application migration runner applies PostgreSQL migrations 0015-0021 for monitoring. Back up an existing database before applying migrations in an actual deployment; no production deployment was performed here. Build the webapp using `npm ci` and `npm run build` in `src`, then build/run using the repository's .NET10 tooling and existing packaging instructions. The full local integration suite exercised the actual application startup/migrations with PostgreSQL16 and ClickHouse26.8.36.3; this is not production or physical-device acceptance.
+
+After signing in as an app owner, use Settings > Monitoring to choose capture, raw forwarding, detail retention and optional local alerts. For Sentry SDKs, provision the release/debug DSNs there and follow `sentry-compatibility.md`, including disabling session/client-report/attachment/profile features. Use the native App-Key endpoint contract for other clients. Existing usage analytics remain independent of these switches. Alerts are an on-server inbox only: no external email/webhook delivery is implemented.
 
 ## Start safely
 
@@ -25,7 +33,7 @@ The sample sends nothing unless `--send` is supplied. For an explicitly authoriz
 
 Use `POST /api/v0/error` with the App-Key header and JSON containing `eventId`, `errorType`, `errorMessage`, optional `stackTrace`, `timestamp`, `release` (falls back to `appVersion`), `environment`, `platform`, OS/SDK versions, `severity`, `kind`, and `isDebug`. See `error-api-openapi.yaml` for bounds and semantics. Send structured diagnostic labels only; no user/session IDs are needed for issue tracking.
 
-New post-resolution occurrences reopen the issue. Replayed IDs and delayed reports dated before resolution do not. Groups are app/build-wide across releases/environments; those labels filter retained occurrences but do not create independent resolution state. Displayed issue totals remain lifetime totals. Receipt/context retention is at least 30 days; reuse after expiry may count again.
+New post-resolution occurrences reopen the issue. Replayed IDs and delayed reports dated before resolution do not. Groups are app/build-wide across releases/environments; those labels filter retained occurrences but do not create independent resolution state. Displayed issue totals remain lifetime totals. Receipt/context retention follows the app setting (1-30 days, default 30); reuse after expiry may count again.
 
 ## Performance reports
 
@@ -33,8 +41,8 @@ See `app-performance-api.md` for the complete transaction/span contract. Child s
 
 ## Privacy and retention
 
-Allowlist diagnostic fields at the source. Regex redaction catches common identifiers but cannot guarantee arbitrary exception messages or source paths are free of personal data. Avoid capturing payloads, credentials, headers, cookies and personal filesystem paths. Issue occurrence details and performance samples are retained for at least 30 days; issue summaries persist. The existing raw error store retains its original 180-day TTL. Durable delivery temporarily retains existing raw fields until acknowledgement, and read APIs deduplicate replayed event IDs. Do not confuse the longer raw-error retention with the shorter idempotency/context window.
+Allowlist diagnostic fields at the source. Regex redaction catches common identifiers but cannot guarantee arbitrary exception messages or source paths are free of personal data. Avoid capturing payloads, credentials, headers, cookies and personal filesystem paths. Issue occurrence details and performance samples follow the app retention setting (1-30 days, default 30), with eventual bounded cleanup; issue summaries persist until cleared. The existing raw error store retains its original 180-day TTL. Durable delivery temporarily retains existing raw fields until acknowledgement or the app detail retention deadline, and read APIs deduplicate replayed event IDs. Do not confuse the longer raw-error retention with the shorter idempotency/context window.
 
 ## Acceptance boundaries
 
-Native HTTP, PostgreSQL storage, validation, authorization, retry behavior and synthetic performance aggregates are tested locally. Real SDK-generated Sentry envelopes, native crash handling, offline mobile queues, source symbolication, device energy overhead and production load are not yet accepted. See `monitoring-roadmap.md` for remaining work.
+Native HTTP, PostgreSQL storage, validation, authorization, retry behavior and synthetic performance aggregates are tested locally. Actual Sentry .NET 6.10.0 exception/transaction envelopes are verified through SDK serialization, compression and authentication to a local TestServer/database. Other SDK/platform versions, native crash handling, offline mobile queues, source symbolication, physical-device energy overhead and production load are unverified. See `monitoring-roadmap.md` for remaining work.

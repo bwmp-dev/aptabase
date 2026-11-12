@@ -1,6 +1,6 @@
 # Desktop/mobile app performance API
 
-Initial self-hosted subset; no Sentry tracing compatibility claim. All event/transaction data is scoped to the authenticated App-Key. No cookies, user IDs, request bodies or arbitrary context are retained. Use stable operation names, not paths, usernames or URLs; regex redaction is defense in depth, not a guarantee that arbitrary text contains no personal information.
+Native self-hosted app-performance API. The separately documented Sentry adapter accepts a bounded transaction subset; see `sentry-compatibility.md`. All event/transaction data is scoped to the authenticated App-Key. No cookies, user IDs, request bodies or arbitrary context are retained. Use stable operation names, not paths, usernames or URLs; regex redaction is defense in depth, not a guarantee that arbitrary text contains no personal information.
 
 ## Collect
 
@@ -16,7 +16,7 @@ Fields:
 - `release`, `environment`, `platform`: optional labels bounded at 100, 50, 30 characters. Empty string when omitted. `isDebug`: false by default, separate from environment.
 - `spans`: optional array (default empty), at most 100. Each has `spanId` (nonzero 16 lowercase hex), optional `parentSpanId` referencing another span in this transaction, required bounded `name`/`operation`, `startOffsetMs`, `durationMs`, and `status` as above. IDs must be unique, relationships acyclic, spans within transaction and parent bounds. No external-parent/distributed-trace semantics in this subset.
 
-Transactions and their spans are retained for at least 30 days from reception, then purged in bounded batches. Idempotency expires with that record. PostgreSQL storage is for modest self-hosted volume; benchmark against actual traffic before increasing collection rates.
+Transactions and spans use the app retention setting (1-30 days, default 30) from reception, then are purged in bounded batches. Idempotency expires with that record. PostgreSQL storage is for modest self-hosted volume; benchmark against actual traffic before increasing collection rates.
 
 ## Read
 

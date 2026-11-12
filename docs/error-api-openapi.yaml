@@ -15,7 +15,7 @@ info:
     occurrences with pagination; accepts buildMode, environment, release, offset and limit.
     Occurrences include eventId, timestamp, errorMessage, stackTrace, release, environment,
     platform, osName, osVersion, sdkVersion, severity and kind; no session/user identifiers.
-    They expire with deduplication receipts after at least 30 days. Older issue summaries
+    They expire with deduplication receipts after the app retention window (1-30 days, default 30). Older issue summaries
     can therefore exist without retained event details.
     GET /api/v0/apps/{appId}/releases?buildMode=release|debug returns {releases}, the newest
     100 observed release/environment pairs with errorCount, transactionCount, firstSeen,
@@ -47,8 +47,8 @@ paths:
         Returns **202 Accepted** once the issue aggregate is persisted in PostgreSQL
         and the raw error is durably queued for ClickHouse/Tinybird. Raw error storage
         remains asynchronous. Each newly accepted event counts as one occurrence;
-        SDK retries with the same eventId are deduplicated per app/build for at least
-        30 days. Legacy senders without eventId produce a new occurrence per request. Issues cover new reports only.
+        SDK retries with the same eventId are deduplicated per app/build within the app
+        retention window (1-30 days, default 30). Legacy senders without eventId produce a new occurrence per request. Issues cover new reports only.
 
         Grouping v1 hashes the sanitized error type and whitespace-normalized
         stack trace, falling back to the sanitized message when no stack exists.
@@ -63,7 +63,7 @@ paths:
         retain existing raw error fields until delivery or the existing 180-day
         raw TTL. Retained occurrence details omit session identifiers. First accepted payload wins
         for an eventId; do not reuse IDs for distinct occurrences. Expired receipts
-        are purged in batches, so retries after 30 days may count again.
+        are purged in batches after that window, so retries after expiry may count again.
       parameters:
         - name: App-Key
           in: header

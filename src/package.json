@@ -7,7 +7,9 @@
     "build": "tsc && vite build",
     "dev": "vite --clearScreen false",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "playwright test --workers=1",
+    "test:e2e:real": "playwright test -c playwright.real.config.ts --workers=1"
   },
   "dependencies": {
     "@aptabase/web": "0.4.0",
@@ -45,6 +47,7 @@
     "sonner": "1.0.3"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@tailwindcss/typography": "0.5.10",
     "@testing-library/react": "^14.3.1",
     "@types/node": "20.8.7",

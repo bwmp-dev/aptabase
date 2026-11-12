@@ -24,7 +24,7 @@ Cleanup jobs run every 5 minutes in bounded 10000-row batches; expiry is eventua
 
 ## Local alert inbox
 
-When enabled, newly grouped issues and automatic post-resolution regressions create an inbox entry in the same transaction as ingestion. A duplicate retry produces no alert; explicit/manual reopen does not trigger an alert. Per-issue cooldown suppresses repeated regressions (not delayed delivery). No backlog is synthesized when enabled. A changed environment/release is not by itself a regression; the issue grouping/reopen policy remains app/build-wide.
+When enabled, newly grouped issues and automatic post-resolution regressions create an inbox entry in the same transaction as ingestion. A duplicate retry produces no alert; explicit/manual reopen does not trigger an alert. The per-issue/build cooldown starts at the last alert of any kind, including the new-issue alert. A regression within that interval is suppressed rather than queued for later delivery; this deliberately avoids two rapid alerts for the same issue. After the interval, a new eligible recurrence may create a regression alert. No backlog is synthesized when enabled. A changed environment/release is not by itself a regression; the issue grouping/reopen policy remains app/build-wide.
 
 Delivery is the durable local PostgreSQL inbox itself, with no email, webhooks, external networking, destination secrets or background external sender. A failed ingestion transaction rolls back the alert too; a successful retry cannot duplicate it. Threshold/rate alerts and external delivery are deferred until channel/volume requirements are agreed.
 
