@@ -10,7 +10,7 @@ This extends checkpoint `7424a81`. It is a capability assessment and tested SDK 
 | Android 36.1.12, iOS 26.2.10191, MacCatalyst 26.2.10191, MAUI Windows 10.0.1 workloads | Read-only workload inventory | An installed iOS workload on Windows is not a usable Mac/Xcode signing/build host; no Apple build was attempted |
 | Java 25.0.1 and Maven | Actual Sentry Java 8.64.0 HTTP envelopes, exception capture, uncaught process exception, transaction and span persisted by collector | JVM desktop behavior only; Android lifecycle, ANRs, R8 mappings and NDK integration are not verified |
 | Android SDK platforms 28–31, 33–36; NDK 29.0.13846066 / LLVM 21 | Compiled a tiny ARM64 object and resolved an address to its function/source line offline | No executable/device crash, unwind, dump parsing, collector upload or server-side worker |
-| Node 24.19.0 | Available for a separate JavaScript SDK/source-map acceptance increment | Availability alone proves no SDK compatibility |
+| Node 24.19.0 | Real Sentry Node10.77.1 normal DSN parsing, handled/actual uncaught errors, transaction/span and local source-map enrichment passed | No Electron/browser/React Native/Hermes or server source-map support; see `javascript-sdk-probe.md` |
 | Rust cargo/rustc | Commands installed | No Rust SDK/native crash acceptance yet |
 | Windows Debuggers directory | dbghelp/dbgcore/symsrv DLLs present | No command-line dump debugger found there; DLL presence does not establish a crash-analysis pipeline |
 

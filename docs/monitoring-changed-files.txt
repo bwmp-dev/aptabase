@@ -7,6 +7,7 @@ M	.github/workflows/ci.yml
 A	docs/app-performance-api.md
 A	docs/desktop-mobile-instrumentation.md
 M	docs/error-api-openapi.yaml
+A	docs/javascript-sdk-probe.md
 A	docs/monitoring-changed-files.txt
 A	docs/monitoring-controls-api.md
 A	docs/monitoring-roadmap.md
@@ -52,6 +53,7 @@ A	src/Features/Performance/ReleasesController.cs
 A	src/Features/Performance/TransactionBody.cs
 A	src/Features/Sentry/SentryController.cs
 A	src/Features/Sentry/SentryEnvelope.cs
+A	src/Features/Sentry/SentryIngestionKey.cs
 M	src/Program.cs
 A	src/e2e/fixture-api.ts
 A	src/e2e/issues.spec.ts
@@ -117,8 +119,15 @@ A	tests/SdkProbes/Java/pom.xml
 A	tests/SdkProbes/Java/run.ps1
 A	tests/SdkProbes/Native/probe.c
 A	tests/SdkProbes/Native/run.ps1
+A	tests/SdkProbes/Node/fixture/thrower.ts
+A	tests/SdkProbes/Node/fixture/tsconfig.json
+A	tests/SdkProbes/Node/package-lock.json
+A	tests/SdkProbes/Node/package.json
+A	tests/SdkProbes/Node/probe.cjs
+A	tests/SdkProbes/Node/run.ps1
 M	tests/UnitTests/Features/ErrorReporting/ErrorsControllerQuotaTests.cs
 A	tests/UnitTests/Features/ErrorReporting/IssueTests.cs
 M	tests/UnitTests/Features/ErrorReporting/PiiSanitizerTests.cs
 A	tests/UnitTests/Features/Performance/TransactionBodyTests.cs
 A	tests/UnitTests/Features/Sentry/SentryEnvelopeTests.cs
+A	tests/UnitTests/Features/Sentry/SentryIngestionKeyTests.cs

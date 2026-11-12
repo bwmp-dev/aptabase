@@ -1,0 +1,11 @@
+{
+  "name": "aptabase-sentry-node-probe",
+  "version": "1.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "description": "Test-only acceptance probe; installed into bin/deps by run.ps1.",
+  "dependencies": {
+    "@sentry/node": "10.77.1",
+    "typescript": "5.9.3"
+  }
+}
