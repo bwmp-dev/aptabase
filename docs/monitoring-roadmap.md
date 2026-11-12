@@ -62,7 +62,7 @@ The fork's LICENSE and attribution remain unchanged. Any future copied source re
 - [x] Self-hosted PostgreSQL storage first, with 30-day event retention and indexed app/build/time queries. Preserve existing ClickHouse/Tinybird analytics unchanged. Reassess storage against measured volume before claiming scale.
 - [ ] App-scoped latency summaries (count, errors, p50/p95) and transaction/span details, filtered by environment/release/time. Never collect request payloads, user identifiers or full URLs by default.
 - [ ] Acceptance: duration/span/count/name bounds, retry deduplication, malformed parent relationships, tenant access and percentile fixtures tested.
-- [ ] Desktop/mobile instrumentation docs and examples explaining stable operation names, sampling, monotonic durations, offline retry IDs and privacy boundaries.
+- [x] Desktop/mobile instrumentation docs and examples explaining stable operation names, sampling, monotonic durations, offline retry IDs and privacy boundaries.
 - [ ] Headless frontend-to-backend tests and narrow/desktop visual checks with local fixture data.
 
 ## Owner decisions and scope boundaries
@@ -116,3 +116,7 @@ Replaced the in-memory error buffer with a transactional PostgreSQL outbox. A wo
 Passed: 248 unit tests and both PostgreSQL/HTTP scenarios, now including lost acknowledgements, partial success and concurrent outbox workers. `python scripts/test-error-query-dedup.py` passed actual ClickHouse query templates against duplicate fixtures using a network-disabled cached ClickHouse 24.8 local process (0.5 CPU/512MB, no server). Matching Tinybird templates changed; hosted Tinybird execution remains unrun. Older ClickHouse local verifies syntax/behavior, not a full production 26.8 deployment.
 
 A build initially found a migration/service class name collision; the migration was renamed and checks passed. Existing NuGet vulnerability warnings remain.
+
+### Instrumentation example
+
+Added native desktop/mobile instrumentation guidance and a dependency-free .NET sample. `dotnet run --project samples/DotNetMonitoring --verbosity quiet` built and ran successfully in offline mode, printing sample JSON only. No alert, webhook, email or external telemetry was sent. Device-specific SDK and physical-device validation remain open.

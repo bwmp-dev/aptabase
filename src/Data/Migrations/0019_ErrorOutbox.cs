@@ -22,4 +22,3 @@ public class AddErrorOutbox : Migration
 
     public override void Down() => Delete.Table("error_outbox");
 }
-
