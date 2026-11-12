@@ -5,6 +5,7 @@ Compared with starting commit 61d4c01. A=added, M=modified, D=deleted.
 
 M	.github/workflows/ci.yml
 A	docs/app-performance-api.md
+A	docs/coolify-upgrade-readiness.md
 A	docs/desktop-mobile-instrumentation.md
 M	docs/error-api-openapi.yaml
 A	docs/glitchtip-history-preservation.md

@@ -1,5 +1,10 @@
 # Self-hosted production acceptance
 
+## Latest verified status (2026-11-12)
+
+The sections below record earlier increments; use [current release evidence](fork-release-handoff.md) and [current deployment gates](coolify-upgrade-readiness.md) for the final candidate. Local image `sha256:c3e05c596bf555edd60c578525d3fe1c6e92c92a034e8d07562753d6ac748f9e` passed8grouped real TLS/auth/migration/replacement-container checks. Final frontend evidence is130unit,46mocked and40real-backend browser tests. The local MultiShock candidate uses public SDK1.16.0, builds with0warnings/errors and passes278tests. Its disclosure now acknowledges logs and account/device identifiers. Two reduced-harness automatic WinUI events preserved353:17, but exit/watchdog evidence was lost. None of this establishes full-app runtime, production backup/restore, publication or deployment readiness. No unchanged tests were rerun for this documentation correction.
+
+
 This increment tests the real Aptabase `Program` in **Production**, using an in-process HTTP test server, disposable PostgreSQL/ClickHouse and a local mail catcher. It does not use MonitoringHost's test-login route. No browser, MAUI process, public listener or external notification is involved.
 
 ## Configuration changes
@@ -43,3 +48,7 @@ dotnet test tests/IntegrationTests --no-restore -m:1 --settings tests/Integratio
 ```
 
 Remaining production gates: actual HTTPS/proxy/mail deployment; operational recovery including ClickHouse and persistent cookie keys at the deployed identity; capacity/load and worker/storage topology; owner-selected retention; real application SDK behavior. See the [retirement matrix](glitchtip-retirement-readiness.md) for the current owner path. The owner has waived old GlitchTip history; the recovery gate here protects new Aptabase data. Passing this test does not authorize deployment or retirement.
+
+## Existing Coolify version check
+
+The parent inspected an existing Aptabase deployment on PostgreSQL15 and ClickHouse23.8.4. Local matching-line acceptance now passes81integration checks with1optional worker skip on15.19/23.8.4.69. Unlike the prior26.8 image, stock23.8 lacks the file-backup allowed-path configuration; the isolated restore rehearsal added it explicitly. Parent must reconcile pending configuration and verify recoverable production backups before deployment; private operational observations are intentionally omitted. See [Coolify upgrade readiness](coolify-upgrade-readiness.md) for exact evidence, image-publishing limitations, configuration requirements and rollback plan. No live service was changed.

@@ -145,7 +145,7 @@ jobs:
         working-directory: etc/tinybird
 
       - name: Tinybird deploy check (dev)
-        if: env.TB_TOKEN != ''
+        if: github.repository == 'aptabase/aptabase' && env.TB_TOKEN != ''
         run: tb --cloud --host "$TB_HOST" --token "$TB_TOKEN" deploy --check
         working-directory: etc/tinybird
 
@@ -174,6 +174,17 @@ jobs:
           tags: aptabase:${{ matrix.platform }}
           outputs: type=docker,dest=/tmp/aptabase-${{ matrix.platform }}.tar
 
+      - name: Accept fork amd64 image over isolated HTTPS
+        if: github.repository == 'bwmp-dev/aptabase' && matrix.platform == 'amd64'
+        timeout-minutes: 15
+        env:
+          APTABASE_IMAGE_TEST_IMAGE: aptabase:amd64
+        run: |
+          docker load --input /tmp/aptabase-amd64.tar
+          python3 -m venv "$RUNNER_TEMP/image-test-venv"
+          "$RUNNER_TEMP/image-test-venv/bin/pip" install --disable-pip-version-check -r tests/ImageAcceptance/requirements.txt
+          "$RUNNER_TEMP/image-test-venv/bin/python" tests/ImageAcceptance/run.py
+
       - name: Upload Image
         uses: actions/upload-artifact@v7
         with:
@@ -181,7 +192,7 @@ jobs:
           path: /tmp/aptabase-${{ matrix.platform }}.tar
 
   publish:
-    if: ${{ github.ref == 'refs/heads/main' }}
+    if: ${{ github.repository == 'aptabase/aptabase' && github.ref == 'refs/heads/main' }}
     name: Publish
     runs-on: ubuntu-latest
     needs: [build, test]
@@ -239,7 +250,7 @@ jobs:
   # Keeps the dev Tinybird workspace in sync with main. Acts as a live rehearsal before the production gates.
   # All Tinybird deploy jobs run only when the push changed etc/tinybird.
   deploy-tinybird-dev:
-    if: ${{ github.ref == 'refs/heads/main' && needs.tinybird-check.outputs.changed == 'true' }}
+    if: ${{ github.repository == 'aptabase/aptabase' && github.ref == 'refs/heads/main' && needs.tinybird-check.outputs.changed == 'true' }}
     name: Deploy Tinybird (dev)
     runs-on: ubuntu-latest
     needs: [test, tinybird-check, tinybird-build]
@@ -265,7 +276,7 @@ jobs:
   # ECR push, so the schema must be live before the new backend image starts. When etc/tinybird
   # did not change, these jobs are skipped and the backend deploys proceed without them.
   deploy-tinybird-us:
-    if: ${{ github.ref == 'refs/heads/main' && needs.tinybird-check.outputs.changed == 'true' }}
+    if: ${{ github.repository == 'aptabase/aptabase' && github.ref == 'refs/heads/main' && needs.tinybird-check.outputs.changed == 'true' }}
     name: Deploy Tinybird (US)
     runs-on: ubuntu-latest
     environment: "Tinybird US"
@@ -288,7 +299,7 @@ jobs:
         working-directory: etc/tinybird
 
   deploy-tinybird-eu:
-    if: ${{ github.ref == 'refs/heads/main' && needs.tinybird-check.outputs.changed == 'true' }}
+    if: ${{ github.repository == 'aptabase/aptabase' && github.ref == 'refs/heads/main' && needs.tinybird-check.outputs.changed == 'true' }}
     name: Deploy Tinybird (EU)
     runs-on: ubuntu-latest
     environment: "Tinybird EU"
@@ -315,6 +326,7 @@ jobs:
   deploy-us:
     if: >-
       ${{ !cancelled()
+          && github.repository == 'aptabase/aptabase'
           && github.ref == 'refs/heads/main'
           && needs.publish.result == 'success'
           && (needs.deploy-tinybird-us.result == 'success' || needs.deploy-tinybird-us.result == 'skipped') }}
@@ -379,6 +391,7 @@ jobs:
   deploy-eu:
     if: >-
       ${{ !cancelled()
+          && github.repository == 'aptabase/aptabase'
           && github.ref == 'refs/heads/main'
           && needs.publish.result == 'success'
           && (needs.deploy-tinybird-eu.result == 'success' || needs.deploy-tinybird-eu.result == 'skipped') }}

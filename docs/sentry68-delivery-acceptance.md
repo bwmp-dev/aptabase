@@ -22,7 +22,10 @@ The pinned upstream [HTTP response handling](https://github.com/getsentry/sentry
 
 `EnvelopeInventoryTests.BeforeSend_Error_OptOut_Does_Not_Suppress_Sessions_Or_Client_Reports` configures `BeforeSend => null`, session tracking and default client reports, then captures a synthetic error and explicitly ends the session. The error is absent, while actual SDK session updates and a `before_send` error counter are emitted.
 
-The verified MultiShock source uses an error `BeforeSend` condition tied to `EnableAnalytics`; this test does **not** prove that its current runtime sends anything while opted out. It does prove that this callback alone is not sufficient to guarantee silence with metadata enabled. A future candidate must gate the SDK lifecycle/transport consistently with the application's consent policy and define what happens to already-cached reports when consent is revoked. Preserve meaningful session/report support when enabled; do not globally disable or silently discard it as a workaround. No MultiShock source or live configuration was changed.
+The original MultiShock source tied this filter to `EnableAnalytics`. The authorized local candidate now removes that gate and explicitly enables sessions while usage analytics remains separately gated. Corrected disclosure and a README release note acknowledge diagnostic messages, paths, logs and identifiers. The previous whole-SDK shutdown/cache-purge recommendation is superseded. These synthetic SDK tests do not prove actual application privacy, toggle or delivery behavior; live configuration is unchanged.
+
+The added `Diagnostic_Only_Configuration_Preserves_Errors_Sessions_And_Client_Reports` case verifies a candidate diagnostic-only callback with the real core6.8 SDK and socket-free HTTP sink. It filters a synthetic message, retains a captured exception with its UUID/release/environment, observes initial and exited sessions with one error, and accepts a `before_send/error/1` report. Parsed output excludes the synthetic identity marker. It does not exercise MultiShock's analytics toggle, WinUI hooks or real application lifecycle. See the [candidate migration instructions](windows-monitoring-migration.md) for disclosure, independent controls and queued-data behavior.
+
 
 ## Mixed unhandled/crashed-session replay against the collector
 
@@ -42,7 +45,7 @@ This adds actual SDK6.8 serialization/cache-to-PostgreSQL evidence to the earlie
 
 ```powershell
 # No sockets or services required for the new HTTP and consent tests:
-dotnet test tests/SdkReliability --no-restore -m:1 --filter 'FullyQualifiedName~HttpFailureSemanticsTests|FullyQualifiedName~BeforeSend_Error_OptOut'
+dotnet test tests/SdkReliability --no-restore -m:1 --filter 'FullyQualifiedName~HttpFailureSemanticsTests|FullyQualifiedName~EnvelopeInventoryTests'
 # Only with the separately started disposable MonitoringHost and synthetic database:
 $env:APTABASE_SDK_TEST_COLLECTOR = 'http://127.0.0.1:55450/'
 dotnet test tests/SdkReliability --no-restore -m:1

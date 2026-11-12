@@ -1,0 +1,59 @@
+# Existing Coolify Aptabase upgrade acceptance
+
+Scope: update the existing Aptabase service, not provision a replacement GlitchTip or new hosting. No live access, configuration change, push, deployment or app launch was performed here. Parent owns Coolify inspection and coordination. Owner waived GlitchTip history, **not existing Aptabase analytics or its recovery**.
+
+## Deployment scope and private operational handoff
+
+The owner selected an update to the existing self-hosted Aptabase deployment. Parent owns production inspection and coordination; actual hostnames, administrative identifiers, storage inventory and backup-configuration details do not belong in this publishable document. Resolve any pending configuration changes and establish recoverable backups before mutation. No production backup/restore success, permission/secret readiness or deployment acceptance is claimed here.
+
+## Isolated version compatibility evidence
+
+Local test containers use PostgreSQL **15.19** (`postgres:15-alpine`) and ClickHouse **23.8.4.69** (`clickhouse/clickhouse-server:23.8.4.69-alpine`). These exercise the reported database line, not verified byte-identical production images or configuration. Both were downloaded sequentially, restricted to loopback and bounded to0.5CPU/256MiB and1CPU/768MiB respectively. Local mail catcher is the only mail destination. Manual MAUI ports55439/55440 are untouched.
+
+Image manifest digests:
+
+- PostgreSQL: `sha256:eab009ce9447a891d9482702d370bbf132c18563bb87cfdcc2b815c6d3b0372f`
+- ClickHouse: `sha256:3502bc90721e1b8b976ba6b249ff849ba4ceeb08d66f93918ef363e0cbdd9a63`
+
+The initial full integration run had78passed/2failed/1skipped. Stock ClickHouse23.8 refused native file backup with Code318: `backups.allowed_path` not configured. The session grouping fixture also seeded timestamps from the database clock at the API's current-time upper boundary. It now uses the same five-minutes-old fixture timestamp as its other sessions, avoiding cross-clock boundary dependence; production query behavior is unchanged.
+
+For the backup rehearsal only, a new disposable ClickHouse container mounts a read-only config defining `<backups><allowed_path>/var/lib/clickhouse/backups/</allowed_path></backups>`. The backup directory is created as the existing `clickhouse` user; no account, permission or live configuration was altered. Both native backup and restore then succeeded. This configuration is **not assumed present in Coolify**; an authorized operational plan must select and verify an actual backup mechanism/destination.
+
+The new upgrade regression migrates a synthetic schema14 database to24 twice, checking preserved users, app ID/key/owner/analytics state, salts and shared-reader access. New capture defaults are enabled, retention30days and local alerts off. An initial test-fixture error used FluentMigrator's default history table; corrected to use the same `VersionTable` registration as production. This is representative fork-baseline upgrade evidence, not proof of the unknown live schema or all existing production rows.
+
+Final full integration result: **81passed,0failed,1skipped (82total)**, sequential,37seconds. The skipped optional native-worker process test needs separately configured worker images/fixtures; prior worker acceptance is not rerun or implied here. All migrations, production login/readiness, monitoring boundaries and both backup/restore cases in this suite passed. TRX: `%TEMP%/aptabase-retirement-acceptance/coolify-pg15-ch23-final.trx`. Initial failing evidence is retained separately in `coolify-pg15-ch23.trx` and the intermediate fixture failure in `coolify-pg15-ch23-targeted.trx`.
+
+The independent diagnostic configuration/inventory suite also passes **8/8**,0failed/0skipped, with a clean build. No unchanged unit/frontend/browser suites were rerun. No automatic WinUI or real MultiShock test was run.
+
+## Fork image and configuration readiness
+
+The final local linux/amd64 image is **`sha256:c3e05c596bf555edd60c578525d3fe1c6e92c92a034e8d07562753d6ac748f9e`**. Sequential Linux builds and eight grouped tests of that exact image passed, including loopback TLS, real authentication, schema migration and replacement-container cookie/key continuity using synthetic PostgreSQL15/ClickHouse23.8.4.69 stores. Frontend checks passed130units,46mocked browser cases and40real-backend browser cases. The latter use MonitoringHost; they are distinct from container authentication tests. See [the final evidence](fork-release-handoff.md). These checks were not rerun for this documentation correction.
+
+The Docker web stage uses `npm ci`, and the runtime base is pinned to .NET10.0.15 plus digest. Build-stage tags are not all immutable. The tested image includes local uncommitted work and is not a published release built from a reviewed commit. OS scanning retains unresolved vendor findings; see [the applicability assessment](image-os-assessment.md). No security-clean or production-ready claim follows from build success.
+
+Upstream registry/AWS/Tinybird mutation jobs now require the upstream repository identity. A separate manual fork workflow verifies successful same-SHA fork CI and publishes its already tested amd64 artifact without rebuilding or deploying. Remote CI, registry visibility/pull access and publication remain unverified. Parent must coordinate reviewed source, CI acceptance, publication and intended-host acceptance before deployment. The existing deployment does not acquire the fork automatically.
+
+Configuration review must compare names/mounts without exposing values:
+
+- Keep the existing `DATABASE_URL`, `CLICKHOUSE_URL` (or corresponding `ConnectionStrings__...` precedence), `REGION=SH`, public origin, app keys, SMTP and OAuth settings. Do not regenerate DB credentials or app identities during an image update.
+- `BASE_URL` must be the HTTPS origin with no path, query or credentials. Validate the actual configured value and reverse-proxy behavior in the private operational handoff. Keep the backend private behind Coolify TLS.
+- `AUTH_SECRET` must be private, at least32characters and not a known example. Preserve a valid existing value. If invalid, startup intentionally refuses it; coordinate a separate secure rotation and invalidate/reissue outstanding sign-in links rather than weakening validation. No actual secret was read or requested here.
+- `DATA_PROTECTION_KEYS_DIRECTORY` is optional but persistent cookie keys are recommended for this redeploy: map an absolute **container path** to private persistent storage, retain existing key material/application identity where available, and include it in recovery. Changing to an empty key store may invalidate current login cookies. Do not assume DB volumes also preserve these keys. Key XML is not automatically encrypted at rest; use existing approved storage protections, without exposing the volume publicly.
+- Schema migrations execute at application startup, **before serving traffic**. PostgreSQL through24 and ClickHouse through0006 are in the fork. Changing the image can therefore change data even if a later health check fails. Serialize the first migrating instance; inspect live migration ledgers and schema first. Never use destructive `Down()` migrations as an automatic rollback.
+- `NATIVE_SYMBOL_WORKER_DIRECTORY`, `NATIVE_SYMBOL_WORKER_IMAGE` and optional `NATIVE_SOURCE_WORKER_IMAGE` require a separately designed worker topology. The base app Dockerfile does not install a Docker CLI/socket or provision workers. Leave native upload processing disabled unless that deployment is explicitly configured/tested; no Docker-socket exposure is required for MultiShock's managed Portable-PDB diagnostics.
+- Owner analytics policy is independent: disabling product usage analytics keeps errors/sessions and diagnostic replay. Collector capture settings remain explicit server-side stop controls. The local MultiShock candidate removes the analytics-dependent error filter and explicitly enables sessions; the usage toggle still gates product analytics. Opus corrected the disclosure to acknowledge diagnostic messages, paths, logs and identifiers. The public SDK1.16.0 Release solution build and278tests pass, but real application privacy/delivery behavior remains unverified. PII-off is not log scrubbing.
+
+## Backup, upgrade and rollback plan (requires coordination/approval)
+
+1. Resolve pending Coolify changes first. Record the exact running app/database image digests, configured schema ledger versions, storage mounts, existing external backup arrangements and the proposed image/config delta. Do not treat a healthy container as recovery evidence.
+2. Before the first migrating start, take a consistent **existing Aptabase** PostgreSQL backup, ClickHouse analytics/raw-error backup, and securely preserved configuration/key material. Preserve roles/grants as appropriate: a per-database `pg_dump` does not include cluster roles/tablespaces. Use compatible tools and verify restore with matching production versions in isolation; see official [PostgreSQL15 dump guidance](https://www.postgresql.org/docs/15/backup-dump.html) and [version compatibility](https://www.postgresql.org/docs/15/app-pgdump.html). No private data backup/export is authorized by this document.
+3. Protect actual backups outside disposable application containers and test their restore, hashes and expected data/permissions. Our synthetic archive files are deleted after rehearsal and are **not recovery media for Coolify**. Native ClickHouse backups require an authorized configured destination; do not copy a running raw data directory and assume it is consistent. [Official ClickHouse backup overview](https://clickhouse.com/docs/concepts/features/backup-restore/overview) describes the native mechanism; this document's23.8 evidence is the local executable rehearsal, not a claim that current documentation matches every old setting.
+4. Test the reviewed fork image on the restored isolated stores with outbound services disabled. Verify migration time/locks, schema/analytics preservation, login/key continuity, supported monitoring, quotas/retention and readiness. Do not couple this app upgrade to a database-major upgrade. Current tests show compatibility, not the security-support status or operational load of these old deployment images.
+5. Prepare rollback before approval: preserve the old app digest and a consistent pre-upgrade recovery point. Image rollback alone is not a proven schema rollback. If restoring stores is necessary, stop writes under an approved maintenance procedure and preserve post-cutover data for reconciliation; reverting a database can otherwise lose new records. Specify the rollback window and tolerated downtime/data loss, rather than promising zero-loss rollback.
+6. Only after parent/owner acceptance authorize the exact image/config update and synthetic login/delivery checks. Then separately validate/release the MultiShock candidate and approve its DSN cutover. GlitchTip service retirement remains later; neither its history waiver nor this plan authorizes deleting any data or volumes.
+
+## Current deployment gates
+
+Reconcile pending configuration and verify production backups/restore, schema/key/configuration readiness and intended-host behavior through parent. Reviewed commits, remote CI, publication/pull access and actual MultiShock candidate runtime/cutover remain open. Reduced-harness automatic WinUI events reached the collector with method/basename/353:17; missing exit/watchdog evidence prevents full runtime acceptance. No live operation or denied action was retried for these corrections.
+
+Historical cleanup statements refer only to their named test increments. Do not infer current process/container state or permission to clean up from them; parent coordinates remaining test resources separately.

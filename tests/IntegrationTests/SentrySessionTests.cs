@@ -216,9 +216,9 @@ public class SentrySessionTests
             Assert.Equal(5, (await Health()).GetProperty("clientReports").GetProperty("reports").GetInt64());
             await connection.ExecuteAsync("""
                 INSERT INTO monitoring_sessions(app_id,is_debug,session_key,started_at,updated_at,sequence,saw_init,status,errors,duration_seconds,release,environment)
-                SELECT 'session-a',false,md5('group-' || g::text),CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1,true,'exited',0,1,'group-' || g::text,'synthetic'
+                SELECT 'session-a',false,md5('group-' || g::text),@started,@started,1,true,'exited',0,1,'group-' || g::text,'synthetic'
                 FROM generate_series(1,100) g;
-                """);
+                """, new { started });
             var truncated = await Health();
             Assert.True(truncated.GetProperty("groupsTruncated").GetBoolean());
             Assert.Equal(100, truncated.GetProperty("groups").GetArrayLength());

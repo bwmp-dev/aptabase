@@ -13,6 +13,17 @@ import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom"
 import { OSIcon } from "./dashboard/icons/os";
 import { SessionTimeline } from "./liveview/timeline";
 
+// returnTo is read from history state, which outlives the click that wrote it and can be replaced by any
+// same-origin script, so only plain absolute paths are followed; "//host" and "/\host" would leave the app.
+function isInAppPath(pathname: unknown, search: unknown): boolean {
+  return (
+    typeof pathname === "string" &&
+    typeof search === "string" &&
+    /^\/(?![/\\])[^\\\s]*$/.test(pathname) &&
+    (search === "" || search.startsWith("?"))
+  );
+}
+
 Component.displayName = "LiveSessionDetailsPage";
 export function Component() {
   const { buildMode } = useApps();
@@ -34,8 +45,9 @@ export function Component() {
   }, []);
 
   const handleBack = () => {
-    if (location.state?.returnTo) {
-      navigate(location.state.returnTo.pathname + location.state.returnTo.search, {
+    const returnTo = location.state?.returnTo;
+    if (isInAppPath(returnTo?.pathname, returnTo?.search)) {
+      navigate(returnTo.pathname + returnTo.search, {
         state: { sessionFilters: location.state.sessionFilters },
       });
     } else {

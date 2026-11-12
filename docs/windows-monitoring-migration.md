@@ -1,8 +1,8 @@
 # One-login Windows monitoring: evidence and migration gates
 
-The target is one Aptabase login for analytics, errors and app performance. This is an integrated collector/dashboard, not a second identity service or an iframe around GlitchTip. No existing GlitchTip data or MultiShock/Luma configuration was changed during this work. A future replacement needs the application-specific gates below; the synthetic SDK probes are not approval to switch production traffic.
+The target is one Aptabase login for analytics, errors and app performance. This is an integrated collector/dashboard, not a second identity service or an iframe around GlitchTip. Local MultiShock candidate source/disclosure changes are now implemented; live GlitchTip and deployed app configuration remain untouched. A future replacement needs the application-specific gates below; the synthetic SDK probes are not approval to switch production traffic.
 
-**Current retirement decision and evidence:** [MultiShock acceptance matrix](glitchtip-retirement-readiness.md). The preflight/preparation sections below retain historical no-launch findings; the later user-operated handled runtime evidence supersedes them only for handled delivery. Automatic unhandled hooks, process-restart replay and actual MultiShock acceptance remain open.
+**Current retirement decision and evidence:** [MultiShock acceptance matrix](glitchtip-retirement-readiness.md). The preflight/preparation sections below retain historical no-launch findings; later user-operated reduced-harness handled and automatic WinUI deliveries supersede them only for those captured events. Exit/watchdog completion, process-restart replay and actual MultiShock acceptance remain open.
 
 ## Shared authentication and permissions
 
@@ -14,7 +14,7 @@ Production uses the existing `auth-session` cookie and `IsAuthenticated` filter.
 
 ## What is verified for MultiShock's SDK version
 
-Parent-provided findings identify Sentry.Maui **6.8.0**, Windows with managed Portable PDBs, release/environment and PII off, and Aptabase crash capture disabled. Those findings informed the fixture; this task did not inspect/change MultiShock or access its private issue content.
+Parent-provided findings identify Sentry.Maui **6.8.0**, Windows with managed Portable PDBs, release/environment and PII off, and Aptabase crash capture disabled. Those findings informed the initial fixture; subsequent authorized MultiShock source edits compile and pass278tests against the public SDK package1.16.0. No private issue content was accessed.
 
 | Path | Verified here | Not established |
 | --- | --- | --- |
@@ -27,6 +27,22 @@ Reproduce with `tests/SdkProbes/DotNetWindows/run.ps1` and `tests/SdkProbes/Rust
 
 For the compile-only MAUI check, run `dotnet restore tests/SdkProbes/MauiWindowsCompile --locked-mode --source "$env:USERPROFILE/.nuget/packages"`, then `dotnet build tests/SdkProbes/MauiWindowsCompile --configuration Release --no-restore -m:1`. The .NET probe restore can use the same cache-only command. Missing packages fail instead of installing a platform/toolchain. Rust uses `cargo --offline --locked` and one build job. Pinned SDK packages declare MIT; Rust dependencies permit MIT/Apache2 or MIT/Unlicense, with Unicode3.0 additionally required for unicode-ident. No upstream implementation source was copied.
 
+## Selected analytics/diagnostics policy and candidate delta
+
+The owner explicitly chose to keep **errors and sessions enabled when product analytics is disabled**, and to update the **existing Coolify Aptabase deployment**. See the exact trusted quote in the [readiness matrix](glitchtip-retirement-readiness.md). Prior whole-SDK opt-out recommendations are superseded. Parent is inspecting Coolify; no live configuration, push or deployment is authorized here.
+
+The local collector already uses independent owner controls: `capture_errors` governs errors/sessions, `capture_performance` governs transactions, and client reports are accepted while either capture control is on. It has no dependency on MultiShock's `EnableAnalytics` preference. Do not weaken these server-side stop controls or change them automatically when the product-analytics preference changes.
+
+Candidate requirements and current implementation (full-app runtime acceptance remains open):
+
+1. Leave product-analytics event gating attached to `General.EnableAnalytics`. Remove its dependency from the Sentry error `BeforeSend` condition. Do not disable `UseSentry`, session tracking or diagnostic transport when that toggle changes. The inspected callback contained the analytics gate, not a general log scrubber; the local candidate removes it. Do not infer that application logs or exception text are sanitized. Do not turn on additional performance sampling as a side effect.
+2. Preserve `SendDefaultPii=false`, release/channel environment, matching Portable PDBs and method/basename/line/column. Keep path/source/context/identity minimization; PII-off alone is not a sanitizer for arbitrary exception text. Keep supported individual session updates and client-report counters meaningful. Do not restore previously filtered errors or fabricate sessions.
+3. An analytics toggle change must not clear, suppress or relabel pending diagnostic envelopes. Existing diagnostic retries retain their IDs. A separate explicit diagnostic stop control, if later introduced, needs its own policy; none is invented here. HTTP-loss behavior remains a separate release acceptance issue, not fixed by this policy.
+4. Review the actual preference label/help and privacy notice before shipping: it must say product usage analytics stops, while crash/error and session-health reporting continues. Existing users who turned analytics off previously had errors filtered; this candidate changes that behavior and needs explicit release disclosure. Do not describe the toggle as disabling all telemetry. Opus implemented and corrected the local settings disclosure and README release note. It explicitly describes recent logs and account/device identifiers.
+5. Verify the real candidate with analytics on and off: no usage events while off; handled/automatic unhandled errors and individual session updates still arrive, identifiers/diagnostic fields remain bounded, queued diagnostic replay survives the toggle, and the owner capture stop controls still work. The local test below does not exercise the MultiShock toggle, actual MAUI hooks or its cache across processes.
+
+`EnvelopeInventoryTests.Diagnostic_Only_Configuration_Preserves_Errors_Sessions_And_Client_Reports` runs the core6.8 SDK with a diagnostic-only `BeforeSend` callback, automatic sessions, client reports and a socket-free HTTP sink. A synthetic message is intentionally filtered; a real `CaptureException` remains, session start/completion and its error count survive, and a `before_send` discard counter is parsed. This is a synthetic configuration reference, not evidence that the actual MultiShock callback applies equivalent privacy filtering. The real candidate preserves PII-off but has no general log scrubber; actual preference behavior remains unverified.
+
 ## Safe migration plan (not executed)
 
 1. **Prepare an isolated Aptabase test app.** Keep the existing GlitchTip service and current MultiShock release unchanged. Configure retention/capture deliberately; local alerts remain off unless enabled. A single Aptabase account owns the app and grants read-only shares as needed. Obtain its release/debug DSNs from Settings → Monitoring; never put dashboard cookies into a client.
@@ -37,7 +53,7 @@ For the compile-only MAUI check, run `dotnet restore tests/SdkProbes/MauiWindows
 
 ## Remaining blockers for a one-login MultiShock replacement
 
-New independent SDK6.8 evidence: [delivery/consent acceptance](sentry68-delivery-acceptance.md). Error-only consent filtering does not suppress session/client-report metadata. HTTP rejections are not durable cache retries; these policies must be reviewed in an authorized candidate without changing the current app.
+New independent SDK6.8 evidence: [delivery/consent acceptance](sentry68-delivery-acceptance.md). The analytics-dependent error filter conflicts with the selected diagnostics-always-on policy; the candidate delta above resolves the intended configuration. HTTP rejections still are not durable cache retries. Validate both in an authorized candidate without changing the current app.
 
 - A real authorized MultiShock/WinUI packaged-build run with Sentry.Maui6.8.0, exact current integrations and actual published PDBs; this is the principal compatibility gate.
 - Application-level restart/offline crash durability, sampling, payload bounds, unsupported-item handling and privacy review. The sample runners are diagnostic fixtures, not production queues.

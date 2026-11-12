@@ -30,6 +30,51 @@ public class EnvelopeInventoryTests
         Assert.Contains(sink.Parsed, envelope => envelope.ClientReport?.Counters.Any(c => c.Reason == "before_send" && c.Category == "error") == true);
     }
 
+    [Fact]
+    public async Task Diagnostic_Only_Configuration_Preserves_Errors_Sessions_And_Client_Reports()
+    {
+        var sink = new RecordingHttpHandler();
+        SentryId acceptedId;
+        using (SentrySdk.Init(o =>
+        {
+            Configure(o, sink);
+            o.AutoSessionTracking = true;
+            o.SendClientReports = true;
+            // Diagnostic filtering has no dependency on the product-analytics preference.
+            o.SetBeforeSend(e =>
+            {
+                if (e.Exception is null) return null;
+                e.User = new SentryUser();
+                e.Contexts.Clear();
+                e.ServerName = null;
+                return e;
+            });
+        }))
+        {
+            SentrySdk.ConfigureScope(scope => scope.User.Email = "private-identity@example.test");
+            SentrySdk.CaptureMessage("Synthetic message excluded by diagnostic filter");
+            acceptedId = SentrySdk.CaptureException(new InvalidOperationException("Synthetic diagnostic retained"));
+            SentrySdk.EndSession(SessionEndStatus.Exited);
+            await SentrySdk.FlushAsync(TimeSpan.FromSeconds(3));
+        }
+        Assert.Empty(sink.Errors);
+        var error = Assert.Single(sink.Parsed, e => e.Error is not null).Error!;
+        Assert.Equal(Guid.Parse(acceptedId.ToString()).ToString(), error.EventId);
+        Assert.Equal("synthetic-envelope-inventory", error.Release);
+        Assert.Equal("synthetic", error.Environment);
+        var sessions = sink.Parsed.SelectMany(e => e.Sessions).ToArray();
+        Assert.Contains(sessions, session => session.Init);
+        Assert.Contains(sessions, session => session.Status == "exited" && session.Errors == 1);
+        Assert.All(sessions, session =>
+        {
+            Assert.Equal(error.Release, session.Release);
+            Assert.Equal(error.Environment, session.Environment);
+        });
+        Assert.Contains(sink.Parsed, envelope => envelope.ClientReport?.Counters.Any(c =>
+            c.Reason == "before_send" && c.Category == "error" && c.Quantity == 1) == true);
+        Assert.DoesNotContain("private-identity", System.Text.Json.JsonSerializer.Serialize(sink.Parsed));
+    }
+
     [Theory]
     [InlineData(SessionEndStatus.Crashed, "crashed")]
     [InlineData(SessionEndStatus.Exited, "exited")]

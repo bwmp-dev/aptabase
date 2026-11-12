@@ -1,10 +1,16 @@
 # Next user-operated MAUI check
 
-**The only test-mode change from the prior two-window handled test is `handled` → `ui-unhandled`, a fresh run ID, and `ui-unhandled-result.json` as the evidence filename.** Keep the same published harness, loopback collector and cache. The sequences below restate that setup and add explicit evidence/exit capture. They are for the user to run; the agent did not execute them or create an alternative automatic launcher.
+**The mode changes from `handled` to `ui-unhandled`, with a fresh run ID and `ui-unhandled-result.json` evidence filename.** These are user-operated instructions only; do not rerun the harness to apply the evidence-serialization correction below.
 
 This is a reduced MultiShock-derived **Sentry.Maui/core6.8.0** harness, not the published MultiShock application. A blank window may appear and the process should crash. Normal app startup/device/plugin/serial/WebSocket/flow/update/Velopack code is absent. SDK state stays in `bin/publish/probe-data/sentry-cache`; framework profile writes have not been measured. No personal profile contents are inspected. Do not run the full app or end any existing app process.
 
 Prerequisites already checked locally: Docker is available with cached `postgres:16-alpine`; the test-host DLL and built web bundle exist; the harness's static guard verification passes. Services are **not left running for this handoff**. Ports 55439/55440 must be free. Do not rebuild the harness. Its exact hashes are checked below; stop on any mismatch. The collector uses a disposable database and a test-only login route, and must never be exposed publicly.
+
+## Evidence-only correction after the manual runs
+
+Do not rerun the harness to apply this correction. Two manual runs already delivered automatic WinUI unhandled events; their exit evidence was not saved. Window B's former PowerShell process is now absent. The old evidence statement serialized `Get-Content` strings at depth15; Windows PowerShell5.1 attaches PSDrive/PSProvider object graphs to those strings. One line expanded to25,362 characters even at depth2 versus34 for a plain string. That is a confirmed serialization defect consistent with the observed8.3GiB memory use; no exact suspended instruction or exit code was recovered.
+
+The blocks below retain the same launch operation for a future parent-coordinated manual check only. Their evidence step now calls `evidence.ps1`, a serializer with **no process launch, network request or file write**. It reads at most64Ki characters/256 log lines, accepts at most10 events with allowlisted scalar fields, converts timestamps to ISO text and caps JSON at128KiB. It preserves unknown exit codes as null and watchdog/forced-termination evidence unchanged. `test-evidence.ps1` exercises only synthetic data; it never launches the app. No `run.ps1` has been created.
 
 ## Window A: same disposable services
 
@@ -47,6 +53,7 @@ Open a second PowerShell window. No DSN or session cookie is printed/saved. The 
 
 ```powershell
 $ErrorActionPreference = 'Stop'
+. 'D:\Coding\public\aptabase\tests\SdkProbes\MultiShockPreparation\evidence.ps1'
 $publish = 'D:\Coding\public\aptabase\tests\SdkProbes\MultiShockPreparation\bin\publish'
 $exe = (Resolve-Path -LiteralPath (Join-Path $publish 'Aptabase.Isolated.MultiShockProbe.exe')).ProviderPath
 $dll = Join-Path $publish 'Aptabase.Isolated.MultiShockProbe.dll'
@@ -69,7 +76,8 @@ $env:APTABASE_MAUI_PROBE_ALLOW_WINDOW = '1'
 $env:APTABASE_PROBE_MODE = 'ui-unhandled'
 $env:APTABASE_PROBE_RUN = $run
 $log = Join-Path $publish 'probe-data\runtime.log'
-$before = if (Test-Path -LiteralPath $log) { @(Get-Content -LiteralPath $log).Count } else { 0 }
+if ((Test-Path -LiteralPath $log) -and (Get-Item -LiteralPath $log).Length -gt 65536) { throw 'Existing probe log exceeds evidence limit; preserve it and ask before continuing.' }
+$before = if (Test-Path -LiteralPath $log) { [IO.File]::ReadAllLines($log).Length } else { 0 }
 $started = [DateTime]::UtcNow
 $forced = $false
 $probe = $null
@@ -87,10 +95,10 @@ try {
         })
         if ($events.Count -eq 0) { Start-Sleep -Milliseconds 500 }
     }
-    $segment = if (Test-Path -LiteralPath $log) { @(Get-Content -LiteralPath $log | Select-Object -Skip $before) } else { @() }
     $result = Join-Path $publish 'probe-data\ui-unhandled-result.json'
     if (Test-Path -LiteralPath $result) { $result = Join-Path $publish "probe-data\ui-unhandled-result-$run.json" }
-    @{run=$run; mode='ui-unhandled'; startedUtc=$started; finishedUtc=[DateTime]::UtcNow; exitCode=$exitCode; forcedTermination=$forced; exeSha256=$exeHash; dllSha256=$dllHash; logSegment=$segment; events=$events} | ConvertTo-Json -Depth 15 | Set-Content -LiteralPath $result -Encoding UTF8
+    $evidence = ConvertTo-MauiProbeEvidenceJson -Run $run -StartedUtc $started -ExitCode $exitCode -ForcedTermination $forced -ExeSha256 $exeHash -DllSha256 $dllHash -LogPath $log -Before $before -Events $events
+    [IO.File]::WriteAllText($result, $evidence, (New-Object Text.UTF8Encoding($false)))
     Write-Output "Saved $result ; exit=$exitCode ; forced=$forced ; events=$($events.Count)"
 } finally {
     if ($probe -and !$probe.HasExited) { $probe.Kill(); $probe.WaitForExit(5000) | Out-Null }

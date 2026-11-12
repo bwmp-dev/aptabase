@@ -18,6 +18,62 @@ namespace Aptabase.IntegrationTests;
 
 public class MonitoringRecoveryTests(ITestOutputHelper output)
 {
+    [Fact]
+    public async Task Existing_Analytics_Identity_And_Sharing_Survive_Monitoring_Migrations()
+    {
+        var url = Environment.GetEnvironmentVariable("APTABASE_ISSUE_TEST_DATABASE_URL")
+            ?? throw new InvalidOperationException("Isolated PostgreSQL required");
+        var settings = new NpgsqlConnectionStringBuilder(url);
+        Assert.Contains(settings.Host, new[] { "127.0.0.1", "localhost", "::1" });
+        var database = "aptabase_upgrade_" + Guid.NewGuid().ToString("N");
+        await using var admin = new NpgsqlConnection(url);
+        await admin.OpenAsync();
+        await admin.ExecuteAsync($"CREATE DATABASE {database}");
+        try
+        {
+            settings.Database = database;
+            await using var services = new ServiceCollection().AddFluentMigratorCore().ConfigureRunner(r =>
+                r.AddPostgres().WithGlobalConnectionString(settings.ConnectionString)
+                    .WithVersionTable(new Aptabase.Data.Migrations.VersionTable())
+                    .ScanIn(typeof(Program).Assembly).For.Migrations()).BuildServiceProvider();
+            using var scope = services.CreateScope();
+            var runner = scope.ServiceProvider.GetRequiredService<IMigrationRunner>();
+            runner.MigrateUp(14);
+            await using var connection = new NpgsqlConnection(settings.ConnectionString);
+            await connection.OpenAsync();
+            await connection.ExecuteAsync("""
+                INSERT INTO users(id,name,email) VALUES ('upgrade-owner','Synthetic owner','owner@example.test');
+                INSERT INTO apps(id,owner_id,name,app_key,has_events)
+                VALUES ('upgrade-app','upgrade-owner','Existing analytics','SYNTHETIC-UPGRADE',true);
+                INSERT INTO app_shares(app_id,email) VALUES ('upgrade-app','reader@example.test');
+                INSERT INTO app_salts(app_id,date,salt) VALUES ('upgrade-app','2026-11-01',decode(repeat('ab',16),'hex'));
+                """);
+            const string snapshot = """
+                SELECT jsonb_build_object(
+                    'users',(SELECT jsonb_agg(to_jsonb(u)) FROM users u),
+                    'apps',(SELECT jsonb_agg(to_jsonb(a)) FROM (SELECT id,owner_id,name,app_key,has_events FROM apps) a),
+                    'shares',(SELECT jsonb_agg(to_jsonb(s)) FROM app_shares s),
+                    'salts',(SELECT jsonb_agg(to_jsonb(s)) FROM app_salts s))::text
+                """;
+            var before = await connection.ExecuteScalarAsync<string>(snapshot);
+            runner.MigrateUp();
+            runner.MigrateUp();
+            Assert.Equal(before, await connection.ExecuteScalarAsync<string>(snapshot));
+            Assert.Equal(24, await connection.ExecuteScalarAsync<long>("SELECT max(version) FROM migration_history"));
+            Assert.True(await connection.ExecuteScalarAsync<bool>("""
+                SELECT capture_errors AND capture_performance AND forward_raw_errors
+                    AND NOT local_alerts_enabled AND monitoring_retention_days=30
+                FROM apps WHERE id='upgrade-app'
+                """));
+            await using var source = NpgsqlDataSource.Create(settings.ConnectionString);
+            var db = new DbContext(source);
+            Dapper.DefaultTypeMap.MatchNamesWithUnderscores = true;
+            var issues = new IssueStore(db);
+            Assert.Equal(new IssueAccess(true, false), await issues.GetAccess("upgrade-app", new("reader", "Reader", "reader@example.test"), default));
+        }
+        finally { await admin.ExecuteAsync($"DROP DATABASE {database} WITH (FORCE)"); }
+    }
+
     [AnalyticsRecoveryFact]
     public async Task ClickHouse_Backup_Restores_Analytics_Raw_Errors_Views_And_Ttl()
     {

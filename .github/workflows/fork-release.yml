@@ -1,0 +1,57 @@
+name: Publish verified fork image
+on:
+  workflow_dispatch:
+    inputs:
+      ci_run_id:
+        description: Successful Aptabase CI push run for this exact selected ref
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+  packages: write
+concurrency:
+  group: fork-release-${{ github.sha }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'bwmp-dev/aptabase'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify source and CI acceptance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CI_RUN_ID" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/run.json"
+          jq -e --arg sha "$GITHUB_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            .head_sha == $sha and .repository.full_name == $repo and
+            .head_repository.full_name == $repo and .event == "push" and
+            .path == ".github/workflows/ci.yml" and .conclusion == "success"
+          ' "$RUNNER_TEMP/run.json"
+      - name: Download tested amd64 build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+        run: gh run download "$CI_RUN_ID" --repo "$GITHUB_REPOSITORY" --name aptabase-amd64 --dir "$RUNNER_TEMP/image"
+      - name: Load verified artifact
+        run: docker load --input "$RUNNER_TEMP/image/aptabase-amd64.tar"
+      - name: Authenticate fork registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish exact source tag and record digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="ghcr.io/bwmp-dev/aptabase:sha-$GITHUB_SHA-amd64"
+          docker tag aptabase:amd64 "$image"
+          docker push "$image"
+          digest=$(docker image inspect "$image" --format '{{index .RepoDigests 0}}')
+          [[ "$digest" == ghcr.io/bwmp-dev/aptabase@sha256:* ]]
+          printf 'Deploy only by digest: `%s`\n' "$digest" >> "$GITHUB_STEP_SUMMARY"

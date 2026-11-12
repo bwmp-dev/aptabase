@@ -1,7 +1,7 @@
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import mkcert from "vite-plugin-mkcert";
-import { defineConfig } from "vite";
+import { defaultClientConditions, defineConfig } from "vite";
 const pkg = require("./package.json");
 
 // https://vitejs.dev/config/
@@ -12,6 +12,8 @@ export default defineConfig({
   },
   publicDir: "webapp/public",
   build: {
+    // Vite 4's former "modules" default; Vite 7 raised the default to Safari 16 / Chrome 107.
+    target: ["es2020", "edge88", "firefox78", "chrome87", "safari14"],
     outDir: "wwwroot",
     rollupOptions: {
       output: {
@@ -23,9 +25,7 @@ export default defineConfig({
     },
   },
   server: {
-    host: '0.0.0.0',
     port: 3000,
-    https: true,
     headers: {
       "Content-Security-Policy": `default-src 'self' 'unsafe-inline'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://client.crisp.chat; script-src 'self' 'unsafe-inline' https://client.crisp.chat; font-src 'self' https://client.crisp.chat; connect-src https://raw.githubusercontent.com wss://client.relay.crisp.chat https://client.crisp.chat wss://localhost:3000 https://localhost:3000`,
     },
@@ -48,7 +48,7 @@ export default defineConfig({
     },
   },
   resolve: {
-    conditions: ["development", "browser"],
+    conditions: ["development", ...defaultClientConditions],
     alias: [
       {
         find: "@components",
