@@ -1,0 +1,27 @@
+using System.Text.RegularExpressions;
+namespace MultiShock;
+internal static class ProbeIsolation
+{
+    internal static string Dsn => Environment.GetEnvironmentVariable("APTABASE_PROBE_DSN") ?? "";
+    internal static string Scratch => Path.Combine(AppContext.BaseDirectory, "probe-data");
+    internal static void DemandLaunchPermission()
+    {
+        // This opt-in is NOT proof of session isolation; launch remains a separately gated action.
+        if (Environment.GetEnvironmentVariable("APTABASE_MAUI_PROBE_ALLOW_WINDOW") != "1")
+            throw new InvalidOperationException("Launch disabled: a verified disposable Windows session is required.");
+        if (!Regex.IsMatch(Dsn, @"\Ahttp://[a-f0-9]{64}@127\.0\.0\.1:55440/[1-9][0-9]*\z"))
+            throw new InvalidOperationException("Only the disposable loopback collector is permitted.");
+    }
+    internal sealed class LoopbackOnly : DelegatingHandler
+    {
+        internal LoopbackOnly() : base(new HttpClientHandler { UseProxy = false, AllowAutoRedirect = false }) { }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            var u = request.RequestUri!;
+            if (u.Scheme != "http" || u.Host != "127.0.0.1" || u.Port != 55440 ||
+                !Regex.IsMatch(u.AbsolutePath, @"\A/api/[1-9][0-9]*/envelope/\z"))
+                throw new InvalidOperationException("Non-collector transport refused.");
+            return base.SendAsync(request, ct);
+        }
+    }
+}

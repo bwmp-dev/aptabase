@@ -1,0 +1,38 @@
+using Sentry;
+namespace MultiShock;
+public static class MauiProgram
+{
+    public static MauiApp CreateMauiApp()
+    {
+        ProbeIsolation.DemandLaunchPermission();
+        var builder = MauiApp.CreateBuilder().UseMauiApp<App>();
+        builder.UseSentry(options => {
+            options.Dsn = ProbeIsolation.Dsn;
+            options.Release = "multishock-isolated@1.0.0";
+            options.Environment = "synthetic";
+            options.SendDefaultPii = false;
+            options.AutoSessionTracking = false;
+            options.SendClientReports = false;
+            options.ReportAssembliesMode = ReportAssembliesMode.None;
+            options.IsEnvironmentUser = false;
+            options.ServerName = "";
+            options.CacheDirectoryPath = Path.Combine(ProbeIsolation.Scratch, "sentry-cache");
+            options.ShutdownTimeout = TimeSpan.FromSeconds(3);
+            options.CreateHttpMessageHandler = () => new ProbeIsolation.LoopbackOnly();
+            options.SetBeforeSend(e => {
+                e.User = new SentryUser();
+                e.Contexts.Clear();
+                e.ServerName = null;
+                foreach (var ex in e.SentryExceptions ?? [])
+                    foreach (var f in ex.Stacktrace?.Frames ?? []) {
+                        f.FileName = f.FileName?.Replace('\\', '/').Split('/')[^1];
+                        f.AbsolutePath = null;
+                        f.ContextLine = null;
+                        f.PreContext?.Clear(); f.PostContext?.Clear();
+                    }
+                return e;
+            });
+        });
+        return builder.Build();
+    }
+}
