@@ -134,3 +134,17 @@ Added native desktop/mobile instrumentation guidance and a dependency-free .NET 
 264 unit tests and both focused PostgreSQL/HTTP scenarios passed after adding capture/retention/purge and local inbox. New checks cover full required settings validation, shared-reader denial, concurrent duplicate alerts, eligible/suppressed regression, opt-out, pending raw outbox suppression,1-day versus 30-day app isolation, exact purge confirmation, disabled capture prerequisites, no cross-app deletion and compressed-envelope expansion limits. A new test seed initially omitted required `has_events`; corrected and rerun successfully. No external delivery exists. Frontend implementation/real headless acceptance remains in progress.
 
 Latest privacy checks:270 unit tests passed. Added URL/short credential redaction; corrected an initial JWT-prefix regression and reran the entire unit suite. Soft-deleted app monitoring cleanup and expired raw-outbox cleanup are bounded independently of sink success. Integration coverage includes a forced alert insert failure proving receipt/quota/issue/outbox rollback before a successful retry.
+
+## Current acceptance gate (not yet closed)
+
+| Area | Current evidence | Remaining gate |
+| --- | --- | --- |
+| Native errors and issues | Atomic deduplication/quota/outbox, recurrence, scoped search/context; HTTP/PostgreSQL tests passed | Final integrated frontend run |
+| App performance | Bounded spans, retained sampled transactions, p50/p95, labels, permissions; HTTP/PostgreSQL tests passed | Opus UI and headless acceptance |
+| Sentry subset | Actual .NET6.10.0 exception and transaction through serializer/compression/auth to TestServer; unsupported envelopes rejected before writes | Platform-specific SDKs and physical-device/native scenarios are explicitly unverified |
+| Privacy and retention | Capture switches, shortened retention isolation, confirmed scoped purge, soft-delete cleanup, raw suppression/expiry, PII regression suite passed | Opus controls UI; delivered raw data keeps separate180-day TTL |
+| Local alerts | Transactional new/regression inbox, duplicate/cooldown/rollback/disable/read/expiry tests passed | Opus inbox UI; external channels deliberately excluded |
+| Frontend | Delegate reported19 unit tests and12 fixture headless checks passed for issue search; final real issue run was pending | Final performance/context/releases/controls tests, typecheck/build, desktop/mobile real host checks |
+| Repository | Local commits only on feat/error-issues; licenses unchanged | Review combined final diff and commit integrated frontend when delivered |
+
+Latest backend commands: `dotnet test tests/UnitTests --no-restore -m:1` passed270 tests; `dotnet test tests/IntegrationTests --no-restore -m:1 --filter 'FullyQualifiedName~IssueIngestionTests|FullyQualifiedName~IssueTrackingTests'` passed both focused scenarios against isolated PostgreSQL. A subsequent targeted ingestion run also passed JSON response-contract assertions for purge preview and local alerts. No unresolved failure in these checks. Existing NU1902/NU1903 warnings for System.Security.Cryptography.Pkcs10.0.0 remain. Full historical integration suite, hosted Tinybird, production deployment/load, physical devices and external alert delivery are unrun. Do not infer these from the local checks.

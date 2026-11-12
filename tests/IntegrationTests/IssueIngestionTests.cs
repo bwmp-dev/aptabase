@@ -295,7 +295,15 @@ public class IssueIngestionTests
         Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM app_transactions WHERE app_id='app-c'"));
         Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM app_transactions WHERE app_id='app-d'"));
         async Task<HttpResponseMessage> Clear(string confirm) => await http.SendAsync(new HttpRequestMessage(HttpMethod.Delete, route + "/data") { Content = JsonContent.Create(new { confirmAppId = confirm }) });
-        Assert.Equal(HttpStatusCode.OK, (await http.GetAsync(route + "/data")).StatusCode);
+        using var preview = await http.GetAsync(route + "/data");
+        Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+        using var previewJson = JsonDocument.Parse(await preview.Content.ReadAsStringAsync());
+        Assert.True(previewJson.RootElement.GetProperty("excludesDeliveredRawLogs").GetBoolean());
+        Assert.Equal(2, previewJson.RootElement.GetProperty("counts").GetProperty("issues").GetInt32());
+        using var alertList = await http.GetAsync(route + "/alerts");
+        using var alertJson = JsonDocument.Parse(await alertList.Content.ReadAsStringAsync());
+        Assert.Equal(2, alertJson.RootElement.GetProperty("pagination").GetProperty("total").GetInt32());
+        Assert.Contains(alertJson.RootElement.GetProperty("alerts").EnumerateArray(), a => a.GetProperty("kind").GetString() == "new_issue");
         Assert.Equal(HttpStatusCode.Conflict, (await Clear("app-c")).StatusCode);
         settings.CaptureErrors = false; settings.CapturePerformance = false;
         Assert.Equal(HttpStatusCode.OK, (await http.PutAsJsonAsync(route + "/settings", settings)).StatusCode);
