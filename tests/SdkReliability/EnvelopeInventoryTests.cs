@@ -8,6 +8,28 @@ using Xunit;
 
 public class EnvelopeInventoryTests
 {
+    [Fact]
+    public async Task BeforeSend_Error_OptOut_Does_Not_Suppress_Sessions_Or_Client_Reports()
+    {
+        var sink = new RecordingHttpHandler();
+        using (SentrySdk.Init(o =>
+        {
+            Configure(o, sink);
+            o.AutoSessionTracking = true;
+            Assert.True(o.SendClientReports);
+            o.SetBeforeSend(_ => null);
+        }))
+        {
+            SentrySdk.CaptureException(new InvalidOperationException("Synthetic opted-out error"));
+            SentrySdk.EndSession(SessionEndStatus.Exited);
+            await SentrySdk.FlushAsync(TimeSpan.FromSeconds(3));
+        }
+        Assert.Empty(sink.Errors);
+        Assert.All(sink.Parsed, envelope => Assert.Null(envelope.Error));
+        Assert.Contains(sink.Parsed, envelope => envelope.Sessions.Count > 0);
+        Assert.Contains(sink.Parsed, envelope => envelope.ClientReport?.Counters.Any(c => c.Reason == "before_send" && c.Category == "error") == true);
+    }
+
     [Theory]
     [InlineData(SessionEndStatus.Crashed, "crashed")]
     [InlineData(SessionEndStatus.Exited, "exited")]

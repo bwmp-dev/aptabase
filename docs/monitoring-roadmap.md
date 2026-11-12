@@ -298,3 +298,12 @@ Final review/cleanup:335backend units,79full integration,9SDK reliability/serial
 - [ ] Owner decision on archive-only historical access versus a separately scoped one-login history import/view, then staged cutover/rollback and distinct service-retirement/deletion approval.
 
 No frontend/JavaScript implementation changed; prior Opus114unit/46mocked/40real browser results remain historical evidence, not reruns. No production changes, app launch, external alert, push or deployment. See the controlling retirement matrix for exact gates; passing local checks is not permission to retire GlitchTip.
+
+## Independent SDK delivery acceptance (2026-11-12)
+
+- [x] Twelve new coreSDK6.8 cases: HTTP status/cache semantics, transport exception replay, metadata consent boundaries, HTTP-loss counters, and a real-collector mixed unhandled/crashed-session replay with late-init and privacy assertions. Final SDK suite21/21,0failed/0skipped; no MAUI executable or substitute launcher.
+- [x] Actual HTTP500/503/429/403/413/422 responses discard the original in the testedSDK; transport failure retains it.500/503 yield later `send_error` counters; tested429 backoff losses do not. Error-only opt-out still emits sessions/client reports. These are documented cutover risks, not silently changed behavior.
+- [x] Corrected stale migration/session-support documentation and recorded the single authorized-but-denied launch retry. No production/frontend implementation changed; previous346unit/81integration and frontend results retained without reruns.
+- [ ] Runtime review/environment, exact full-app candidate and consent/delivery policy, authorized deployed hosting checks, private GlitchTip archive restore and history-access decision remain required. Further speculative parity work does not close these gates.
+
+See `sentry68-delivery-acceptance.md` for exact evidence/source references. Task-owned alternate-port collector/database removed after testing; manual ports and original app/live service untouched.

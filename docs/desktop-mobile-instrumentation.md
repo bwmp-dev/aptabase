@@ -6,7 +6,7 @@ This collector offers native JSON error/app-performance endpoints and a tested, 
 
 Use the repository's existing self-hosted deployment architecture: PostgreSQL plus either ClickHouse or Tinybird, with the built webapp served by the ASP.NET application. Configure `BASE_URL` to the collector's HTTPS origin, `DATABASE_URL`, `AUTH_SECRET` (a unique randomly generated secret, never a published example), and the selected analytics connection. Existing email/OAuth dashboard sign-in configuration still applies. This work does not create external services or configure real email delivery. Do not use the test host or its test-only login endpoints as a deployment.
 
-The normal application migration runner applies PostgreSQL migrations 0015-0022 for monitoring. Back up an existing database before applying migrations in an actual deployment; no production deployment was performed here. Build the webapp using `npm ci` and `npm run build` in `src`, then build/run using the repository's .NET10 tooling and existing packaging instructions. The full local integration suite exercised the actual application startup/migrations with PostgreSQL16 and ClickHouse26.8.36.3; this is not production or physical-device acceptance.
+The normal application migration runner applies PostgreSQL migrations 0015-0024 for monitoring. Back up an existing database before applying migrations in an actual deployment; no production deployment was performed here. Build the webapp using `npm ci` and `npm run build` in `src`, then build/run using the repository's .NET10 tooling and existing packaging instructions. The full local integration suite exercised the actual application startup/migrations with PostgreSQL16 and ClickHouse26.8.36.3; this is not production or physical-device acceptance.
 
 After signing in as an app owner, use Settings > Monitoring to choose capture, raw forwarding, detail retention and optional local alerts. For Sentry SDKs, provision the release/debug DSNs there and follow `sentry-compatibility.md`, including supported individual session/client-report metadata and disabling unsupported attachment/profile features. Use the native App-Key endpoint contract for other clients. Existing usage analytics remain independent of these switches. Alerts are an on-server inbox only: no external email/webhook delivery is implemented.
 
@@ -18,6 +18,8 @@ After signing in as an app owner, use Settings > Monitoring to choose capture, r
 4. Use a monotonic clock (`Stopwatch` on .NET) for durations and offsets. Use UTC wall time only for the start timestamp. Ensure collector/database clocks are synchronized; error recurrence compares event time to resolution time.
 5. Generate one random event UUID per occurrence/root operation. Persist the same ID and payload for offline retries. Never generate a new ID per retry or reuse an ID across unrelated reports.
 6. Queue only sanitized reports with bounded size/age in your app. Keep network reporting off the UI thread. Apply backoff for 429/transient transport/5xx; do not endlessly retry malformed/authentication failures. Do not emit new monitoring errors when monitoring itself fails.
+
+For Sentry .NET6.8 specifically, do not assume the generic retry guidance above is its default behavior: verified HTTP500/503/429 responses do not durably replay the rejected event, and an error `BeforeSend` opt-out does not suppress sessions/client reports. See [delivery and consent acceptance](sentry68-delivery-acceptance.md) before using it as a MultiShock replacement.
 
 ## .NET example
 
