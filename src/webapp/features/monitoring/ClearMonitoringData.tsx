@@ -18,6 +18,7 @@ const countLabels = [
   ["transactions", "Transactions"],
   ["queued", "Raw logs waiting to be delivered"],
   ["alerts", "Local alerts"],
+  ["symbols", "Native symbol files"],
 ] as const;
 
 function clearErrorMessage(error: unknown) {
@@ -71,8 +72,8 @@ export function ClearMonitoringData({ appId, settings }: Props) {
     <form onSubmit={handleSubmit} className="space-y-4 max-w-2xl">
       <div className="text-sm text-muted-foreground space-y-2">
         <p>
-          Permanently deletes this app's issues, error occurrences, transactions, undelivered raw logs and local alerts
-          from this server's PostgreSQL database, for release and debug builds.
+          Permanently deletes this app's issues, error occurrences, transactions, undelivered raw logs, local alerts and
+          native symbol files from this server's PostgreSQL database, for release and debug builds.
         </p>
         <p>
           Raw error logs that were already delivered are not deleted and are kept for 180 days. Usage analytics are not

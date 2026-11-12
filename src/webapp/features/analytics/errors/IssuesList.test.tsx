@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Issue, IssueEvent } from "./issues";
+import type { Issue, IssueEvent, NativeFramesResponse } from "./issues";
 
 let buildMode = "release";
 
@@ -17,6 +17,7 @@ type Handler = (url: URL, init?: RequestInit) => Reply;
 const fetchMock = vi.fn();
 let handler: Handler;
 let eventsHandler: Handler;
+let nativeFramesHandler: Handler;
 
 const releasesReply = {
   status: 200,
@@ -42,6 +43,7 @@ function event(overrides: Partial<IssueEvent> = {}): IssueEvent {
     sdkVersion: "aptabase-dotnet@1.0.0",
     severity: "fatal",
     kind: "crash",
+    hasNativeFrames: false,
     ...overrides,
   };
 }
@@ -117,6 +119,7 @@ function renderPanel(appId = "a1") {
 beforeEach(() => {
   buildMode = "release";
   eventsHandler = () => eventsReply([event()]);
+  nativeFramesHandler = () => ({ status: 404 });
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (input: string, init?: RequestInit) => {
     const url = new URL(input, "http://localhost");
@@ -124,6 +127,8 @@ beforeEach(() => {
       ? releasesReply
       : url.pathname.endsWith("/events")
       ? await eventsHandler(url, init)
+      : url.pathname.endsWith("/native-frames")
+      ? await nativeFramesHandler(url, init)
       : await handler(url, init);
     return { ok: reply.status >= 200 && reply.status < 300, status: reply.status, json: async () => reply.body };
   });
@@ -489,4 +494,135 @@ describe("IssuesPanel releases and occurrences", () => {
     const dialog = await screen.findByRole("dialog");
     expect(await within(dialog).findByText(/No retained occurrences\. Occurrence details are kept for up to 30 days, depending on app retention; raw error logs are kept separately for 180 days\./)).toBeTruthy();
   });
+});
+
+describe("IssuesPanel native frames", () => {
+  const BUILD_ID = "bbe2c0d49e25325c5e51f939ec1eac37cc159800";
+  const OTHER_BUILD_ID = "0123456789abcdef0123456789abcdef01234567";
+  const NATIVE_EVENT_ID = "7d0d1f5e-7c1e-4c31-9a39-62b3f6f0c0aa";
+
+  const frames: NativeFramesResponse = {
+    capability: "function-only",
+    frames: [
+      { buildId: BUILD_ID, address: "0x2e0", status: "resolved", function: "aptabase_symbol_probe", offset: 4 },
+      { buildId: OTHER_BUILD_ID, address: "0x1a40", status: "unresolved", function: null, offset: null },
+      { buildId: BUILD_ID, address: "0x9000", status: "ambiguous", function: null, offset: null },
+    ],
+  };
+
+  function nativeFrameRequests() {
+    return calls().filter((c) => c.url.pathname.endsWith("/native-frames"));
+  }
+
+  async function openOccurrences(canManage = true) {
+    handler = (url) =>
+      url.pathname.endsWith("/issues") ? listReply([issue()], { canManage }) : { status: 200, body: { issue: issue(), canManage } };
+    eventsHandler = () =>
+      eventsReply([
+        event({ eventId: NATIVE_EVENT_ID, hasNativeFrames: true, stackTrace: `at native ${BUILD_ID}+0x2e0` }),
+        event(),
+      ]);
+    renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: /TypeError/ }));
+    const dialog = await screen.findByRole("dialog");
+    const occurrences = await within(dialog).findByRole("region", { name: "Recent occurrences" });
+    const details = await waitFor(() => {
+      const found = occurrences.querySelectorAll("details");
+      expect(found).toHaveLength(2);
+      return Array.from(found);
+    });
+    return { occurrences, details };
+  }
+
+  function toggle(details: HTMLDetailsElement, open: boolean) {
+    details.open = open;
+    fireEvent(details, new Event("toggle"));
+  }
+
+  it("requests frames only when a native occurrence is expanded and labels them as function-only", async () => {
+    nativeFramesHandler = () => ({ status: 200, body: frames });
+    const { details } = await openOccurrences();
+    expect(nativeFrameRequests()).toHaveLength(0);
+
+    toggle(details[1], true);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(nativeFrameRequests()).toHaveLength(0);
+    expect(within(details[1]).queryByRole("region", { name: "Native frames" })).toBeNull();
+
+    toggle(details[0], true);
+    const section = await within(details[0]).findByRole("region", { name: "Native frames" });
+    expect(section.textContent).toContain("Function names only: no file names, line numbers or inlined frames.");
+    const rows = await within(section).findAllByRole("listitem");
+    expect(rows).toHaveLength(3);
+    expect(rows[0].textContent).toContain("aptabase_symbol_probe +0x4");
+    expect(rows[0].textContent).toContain(`0x2e0 in build ${BUILD_ID}`);
+    expect(rows[1].textContent).toContain("Unresolved");
+    expect(rows[1].textContent).toContain(`0x1a40 in build ${OTHER_BUILD_ID}`);
+    expect(rows[2].textContent).toContain("Ambiguous: more than one symbol file matches this build ID");
+    expect(rows[2].textContent).not.toContain("aptabase_symbol_probe");
+    expect(section.textContent).toContain("Unresolved frames have no ready symbol file for their build ID");
+
+    const [request] = nativeFrameRequests();
+    expect(request.url.pathname).toBe(`/api/v0/apps/a1/issues/${"a".repeat(64)}/events/${NATIVE_EVENT_ID}/native-frames`);
+    expect(Object.fromEntries(request.url.searchParams)).toEqual({ buildMode: "release" });
+  });
+
+  it("re-reads frames when the occurrence is expanded again, so deleted symbols show as unresolved", async () => {
+    let current = frames;
+    nativeFramesHandler = () => ({ status: 200, body: current });
+    const { details } = await openOccurrences();
+
+    toggle(details[0], true);
+    expect(await within(details[0]).findByText("aptabase_symbol_probe")).toBeTruthy();
+
+    current = {
+      ...frames,
+      frames: frames.frames.map((f) => ({ ...f, status: "unresolved" as const, function: null, offset: null })),
+    };
+    toggle(details[0], false);
+    toggle(details[0], true);
+    await waitFor(() => expect(within(details[0]).queryByText("aptabase_symbol_probe")).toBeNull());
+    expect(within(details[0]).getAllByText("Unresolved")).toHaveLength(3);
+    expect(details[0].textContent).toContain(`0x2e0 in build ${BUILD_ID}`);
+    expect(nativeFrameRequests()).toHaveLength(2);
+  });
+
+  it("shows native frames to shared readers", async () => {
+    nativeFramesHandler = () => ({ status: 200, body: frames });
+    const { details } = await openOccurrences(false);
+    toggle(details[0], true);
+    expect(await within(details[0]).findByText("aptabase_symbol_probe")).toBeTruthy();
+    expect(calls().some((c) => c.url.pathname.includes("/native-symbols"))).toBe(false);
+  });
+
+  it("explains frames that are no longer retained", async () => {
+    nativeFramesHandler = () => ({ status: 404 });
+    const { details } = await openOccurrences();
+    toggle(details[0], true);
+    expect(await within(details[0]).findByText("The native frames for this occurrence are no longer retained.")).toBeTruthy();
+    expect(within(details[0]).queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("explains denied access without offering a retry", async () => {
+    nativeFramesHandler = () => ({ status: 403 });
+    const { details } = await openOccurrences();
+    toggle(details[0], true);
+    expect((await within(details[0]).findByRole("alert")).textContent).toBe(
+      "You don't have access to this app's native frames."
+    );
+    expect(within(details[0]).queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("offers a retry after a failure and shows the frames once it succeeds", async () => {
+    let failing = true;
+    nativeFramesHandler = () => (failing ? { status: 500 } : { status: 200, body: frames });
+    const { details } = await openOccurrences();
+    toggle(details[0], true);
+
+    const retry = await within(details[0]).findByRole("button", { name: "Retry" }, { timeout: 6000 });
+    expect(within(details[0]).getByRole("alert").textContent).toBe("Couldn't load the native frames.");
+    failing = false;
+    fireEvent.click(retry);
+    expect(await within(details[0]).findByText("aptabase_symbol_probe")).toBeTruthy();
+  }, 10_000);
 });

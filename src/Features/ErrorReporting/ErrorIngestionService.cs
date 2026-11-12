@@ -16,7 +16,7 @@ public class ErrorIngestionService(IIssueStore issues, IPiiSanitizer sanitizer, 
 
         // Sanitize PII from error message and stack trace
         var sanitizedErrorMessage = sanitizer.Sanitize(body.ErrorMessage);
-        var sanitizedStackTrace = sanitizer.Sanitize(body.StackTrace);
+        var sanitizedStackTrace = body.NativeFrames is null ? sanitizer.Sanitize(body.StackTrace) : string.Join("\n", body.NativeFrames.Select(f => f.RawLine));
 
         // Create tracking error
         var trackingError = new TrackingError
@@ -27,6 +27,7 @@ public class ErrorIngestionService(IIssueStore issues, IPiiSanitizer sanitizer, 
             ErrorMessage = sanitizedErrorMessage,
             ErrorType = sanitizer.SanitizeLabel(body.ErrorType, 100),
             StackTrace = sanitizedStackTrace,
+            NativeFrames = body.NativeFrames,
             GroupingStackTrace = body.GroupingStackTrace is null ? null : sanitizer.Sanitize(body.GroupingStackTrace),
             Release = sanitizer.SanitizeLabel(body.Release ?? body.AppVersion, 100),
             Environment = sanitizer.SanitizeLabel(body.Environment, 50),

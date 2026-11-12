@@ -1,21 +1,12 @@
-import { APIRequestContext, expect } from "@playwright/test";
-import { APP_ID, APP_KEY, login, reportError, runToken, snapshot, test } from "./real-host";
+import { expect } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { APP_ID, APP_KEY, PROBE_PATH, login, reportError, runToken, snapshot, test, withSettings } from "./real-host";
 
 // End-to-end checks of owner monitoring controls against the loopback test host. Settings are app-wide, so every
 // test restores the settings it found, and the destructive clear runs last.
 test.describe.configure({ mode: "serial" });
 
 const settingsPath = `/api/v0/apps/${APP_ID}/monitoring/settings`;
-
-async function withSettings(request: APIRequestContext, run: (original: Record<string, unknown>) => Promise<void>) {
-  const original = await (await request.get(settingsPath)).json();
-  try {
-    await run(original);
-  } finally {
-    const restored = await request.put(settingsPath, { data: original });
-    expect(restored.status(), "restore monitoring settings").toBe(200);
-  }
-}
 
 test.describe("Monitoring controls against the real test host", () => {
   test("local alerts record new issues and regressions; owner reads them by keyboard", async ({ page, context }) => {
@@ -74,7 +65,7 @@ test.describe("Monitoring controls against the real test host", () => {
     }
   });
 
-  test("owner provisions Sentry DSNs from settings", async ({ page, context }) => {
+  test("owner provisions Sentry DSNs from settings", async ({ page, context, baseURL }) => {
     await login(context, "owner");
     await page.goto(`/${APP_ID}/settings`);
     await page.getByRole("tab", { name: "Monitoring" }).click();
@@ -83,19 +74,46 @@ test.describe("Monitoring controls against the real test host", () => {
     const release = page.getByLabel("Release builds", { exact: true });
     await expect(create.or(release)).toBeVisible();
     if (await create.isVisible()) await create.click();
-    await expect(page.getByLabel("Release builds", { exact: true })).toHaveValue(new RegExp(`^https?://${APP_KEY}@[^/]+/\\d+$`));
-    await expect(page.getByLabel("Debug builds", { exact: true })).toHaveValue(new RegExp(`^https?://${APP_KEY}@[^/]+/\\d+$`));
+    await expect(release).not.toHaveValue("");
+
+    // DSN keys are project-scoped: a lowercase 64-hex key per app, project and build mode, never the raw app key.
+    const response = await context.request.get(`/api/v0/apps/${APP_ID}/sentry-projects`);
+    expect(response.status()).toBe(200);
+    const { projects } = (await response.json()) as { projects: { id: string; buildMode: string; dsn: string }[] };
+    expect(projects.map((p) => p.buildMode).sort()).toEqual(["debug", "release"]);
+    const host = new URL(baseURL!);
+    const keys = new Set<string>();
+    for (const project of projects) {
+      expect(project.id).toMatch(/^[1-9]\d*$/);
+      const key = new URL(project.dsn).username;
+      expect(key, `${project.buildMode} DSN key`).toMatch(/^[0-9a-f]{64}$/);
+      expect(key).not.toBe(APP_KEY.toLowerCase());
+      expect(project.dsn).toBe(`${host.protocol}//${key}@${host.host}/${project.id}`);
+      keys.add(key);
+      await expect(page.getByLabel(project.buildMode === "release" ? "Release builds" : "Debug builds", { exact: true })).toHaveValue(
+        project.dsn
+      );
+    }
+    expect(new Set(projects.map((p) => p.id)).size).toBe(2);
+    expect(keys.size).toBe(2);
   });
 
   test("owner turns capture off in the form, then clears PostgreSQL monitoring data", async ({ page, context }) => {
     await login(context, "owner");
     await withSettings(context.request, async () => {
       await reportError(context.request, { errorType: "ClearError", errorMessage: `Clear ${runToken()}` });
+      const upload = await context.request.post(`/api/v0/apps/${APP_ID}/native-symbols?buildMode=debug`, {
+        headers: { "Content-Type": "application/octet-stream" },
+        data: readFileSync(PROBE_PATH),
+      });
+      expect(upload.status(), "symbol files are part of the purge").toBe(202);
 
       await page.goto(`/${APP_ID}/settings`);
       await page.getByRole("tab", { name: "Monitoring" }).click();
       const clearSection = page.getByRole("region", { name: "Clear monitoring data" });
       await expect(clearSection.getByRole("button", { name: "Clear monitoring data" })).toBeDisabled();
+      const symbolCount = clearSection.getByText("Native symbol files", { exact: true }).locator("xpath=following-sibling::dd[1]");
+      await expect(symbolCount).not.toHaveText("0");
 
       for (const label of ["Capture errors", "Capture performance", "Forward raw error logs"]) {
         await page.getByLabel(label).uncheck();
@@ -123,7 +141,7 @@ test.describe("Monitoring controls against the real test host", () => {
 
       const preview = await (await context.request.get(`/api/v0/apps/${APP_ID}/monitoring/data`)).json();
       expect(preview).toEqual({
-        counts: { issues: 0, events: 0, transactions: 0, queued: 0, alerts: 0 },
+        counts: { issues: 0, events: 0, transactions: 0, queued: 0, alerts: 0, symbols: 0 },
         excludesDeliveredRawLogs: true,
       });
     });

@@ -246,6 +246,23 @@ components:
           type: string
           maxLength: 10000
           description: Full stack trace. Optional.
+        nativeFrames:
+          type: array
+          minItems: 1
+          maxItems: 100
+          description: Optional ARM64 ELF text frames; requires eventId and replaces stackTrace for storage/grouping. Function-only resolution requires matching owner-uploaded symbols. See native-symbols-api.md. No dump or arbitrary tombstone input.
+          items:
+            type: object
+            required: [buildId, address]
+            properties:
+              buildId:
+                type: string
+                pattern: '^[a-f0-9]{32}([a-f0-9]{2}){0,16}$'
+                description: Exact GNU build ID, lowercase hex, 16-32 bytes.
+              address:
+                type: string
+                pattern: '^0x[0-9a-f]{1,16}$'
+                description: ELF virtual address after the client applies the module load bias; not a process absolute PC.
         timestamp:
           type: string
           format: date-time

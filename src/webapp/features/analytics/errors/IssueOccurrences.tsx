@@ -8,6 +8,7 @@ import { IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { ISSUE_EVENTS_PAGE_SIZE, IssueEvent, fetchIssueEvents, issueKeys } from "./issues";
+import { NativeFrames } from "./NativeFrames";
 
 type Props = {
   appId: string;
@@ -48,7 +49,7 @@ export function IssueOccurrences({ appId, buildMode, issueId, filter }: Props) {
       <>
         <ul className="divide-y border-y" aria-busy={isPlaceholderData}>
           {data.events.map((event) => (
-            <OccurrenceItem key={event.eventId} event={event} />
+            <OccurrenceItem key={event.eventId} appId={appId} buildMode={buildMode} issueId={issueId} event={event} />
           ))}
         </ul>
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -95,14 +96,23 @@ export function IssueOccurrences({ appId, buildMode, issueId, filter }: Props) {
   );
 }
 
-function OccurrenceItem({ event }: { event: IssueEvent }) {
+type OccurrenceItemProps = {
+  appId: string;
+  buildMode: BuildMode;
+  issueId: string;
+  event: IssueEvent;
+};
+
+function OccurrenceItem({ appId, buildMode, issueId, event }: OccurrenceItemProps) {
+  // Native frames are resolved when read, so they are only requested once the occurrence is expanded.
+  const [expanded, setExpanded] = useState(false);
   const context = [event.release, event.environment, event.platform, [event.osName, event.osVersion].join(" ").trim()]
     .filter(Boolean)
     .join(" · ");
 
   return (
     <li>
-      <details className="py-2">
+      <details className="py-2" onToggle={(e) => setExpanded(e.currentTarget.open)}>
         <summary className="cursor-pointer rounded text-sm focus-ring marker:text-muted-foreground">
           <time dateTime={event.timestamp}>{new Date(event.timestamp).toLocaleString()}</time>
           {context && <span className="text-muted-foreground"> · {context}</span>}
@@ -123,6 +133,9 @@ function OccurrenceItem({ event }: { event: IssueEvent }) {
             <pre className="bg-muted p-3 rounded-md text-xs font-mono overflow-x-auto whitespace-pre-wrap break-words">
               {event.stackTrace}
             </pre>
+          )}
+          {expanded && event.hasNativeFrames && (
+            <NativeFrames appId={appId} buildMode={buildMode} issueId={issueId} eventId={event.eventId} />
           )}
         </div>
       </details>

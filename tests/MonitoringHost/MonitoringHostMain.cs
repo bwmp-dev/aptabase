@@ -53,6 +53,9 @@ public static class MonitoringHostMain
             builder.Services.AddSingleton<IDbContext>(db);
             builder.Services.AddSingleton<IIssueStore, IssueStore>();
             builder.Services.AddSingleton<PerformanceStore>();
+            builder.Services.AddSingleton<Aptabase.Features.Symbolication.INativeSymbolProcessor,Aptabase.Features.Symbolication.NativeSymbolProcessor>();
+            builder.Services.AddSingleton<Aptabase.Features.Symbolication.NativeSymbolStore>();
+            builder.Services.AddHostedService<Aptabase.Features.Symbolication.NativeSymbolJob>();
             builder.Services.AddSingleton<IPiiSanitizer, PiiSanitizer>();
             builder.Services.AddSingleton<ErrorIngestionService>();
             builder.Services.AddSingleton<IAppQueries, AppQueries>();
@@ -128,7 +131,7 @@ public static class MonitoringHostMain
     {
         public void PopulateFeature(IEnumerable<ApplicationPart> parts, ControllerFeature feature)
         {
-            var allowed = new[] { typeof(ErrorsController), typeof(IssuesController), typeof(PerformanceController), typeof(ReleasesController), typeof(SentryController), typeof(MonitoringController) };
+            var allowed = new[] { typeof(ErrorsController), typeof(IssuesController), typeof(PerformanceController), typeof(ReleasesController), typeof(SentryController), typeof(MonitoringController), typeof(Aptabase.Features.Symbolication.NativeSymbolsController) };
             foreach (var controller in feature.Controllers.ToArray())
                 if (!allowed.Contains(controller.AsType())) feature.Controllers.Remove(controller);
         }

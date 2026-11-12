@@ -18,9 +18,9 @@ Cleanup jobs run every 5 minutes in bounded 10000-row batches; expiry is eventua
 
 ## Preview and clear PostgreSQL monitoring data
 
-`GET /api/v0/apps/{appId}/monitoring/data` returns `{counts:{issues,events,transactions,queued,alerts},excludesDeliveredRawLogs:true}` across both build modes. Counts are a preview, not a reservation.
+`GET /api/v0/apps/{appId}/monitoring/data` returns `{counts:{issues,events,transactions,queued,alerts,symbols},excludesDeliveredRawLogs:true}` across both build modes. Counts are a preview, not a reservation.
 
-`DELETE` on the same route with JSON `{confirmAppId:"exact-app-id"}` clears those PostgreSQL rows and alert cooldown state transactionally. It requires all three capture/raw-forwarding booleans disabled first (otherwise409); mismatched confirmation=>400, success=>204. Use a visible confirmation with preview counts and an explicit warning that delivered raw logs and analytics are not erased. This is local monitoring cleanup, not a full personal-data deletion/export API. Physical app deletion cascades its monitoring rows; soft-deleted apps cannot ingest/read and bounded cleanup removes their PostgreSQL monitoring records, including summaries, pending raw payloads, local alerts and Sentry project bindings. Delivered raw logs retain their separate TTL.
+`DELETE` on the same route with JSON `{confirmAppId:"exact-app-id"}` clears those PostgreSQL rows, private native symbol artifacts/indices and alert cooldown state transactionally. It requires all three capture/raw-forwarding booleans disabled first (otherwise409); mismatched confirmation=>400, success=>204. Use a visible confirmation with preview counts and an explicit warning that delivered raw logs and analytics are not erased. This is local monitoring cleanup, not a full personal-data deletion/export API. Physical app deletion cascades its monitoring rows; soft-deleted apps cannot ingest/read and bounded cleanup removes their PostgreSQL monitoring records, including summaries, pending raw payloads, local alerts and Sentry project bindings. Delivered raw logs retain their separate TTL.
 
 ## Local alert inbox
 

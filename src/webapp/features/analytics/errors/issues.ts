@@ -40,6 +40,22 @@ export interface IssueEvent {
   sdkVersion: string;
   severity: string;
   kind: string;
+  hasNativeFrames: boolean;
+}
+
+export type NativeFrameStatus = "resolved" | "unresolved" | "ambiguous";
+
+export interface NativeFrame {
+  buildId: string;
+  address: string;
+  status: NativeFrameStatus;
+  function: string | null;
+  offset: number | null;
+}
+
+export interface NativeFramesResponse {
+  capability: "function-only";
+  frames: NativeFrame[];
 }
 
 export interface IssueEventsResponse {
@@ -70,6 +86,9 @@ export const issueKeys = {
     [...issueKeys.scope(appId, buildMode), "detail", issueId] as const,
   events: (appId: string, buildMode: BuildMode, issueId: string, filter: ReleaseFilter, offset: number) =>
     [...issueKeys.scope(appId, buildMode), "events", issueId, filter, offset] as const,
+  allNativeFrames: (appId: string, buildMode: BuildMode) => [...issueKeys.scope(appId, buildMode), "native-frames"] as const,
+  nativeFrames: (appId: string, buildMode: BuildMode, issueId: string, eventId: string) =>
+    [...issueKeys.allNativeFrames(appId, buildMode), issueId, eventId] as const,
 };
 
 function issuesPath(appId: string, issueId?: string) {
@@ -115,6 +134,16 @@ export function fetchIssueEvents(
   });
   appendReleaseFilter(params, filter);
   return fetchJson(`${issuesPath(appId, issueId)}/events?${params}`);
+}
+
+export function fetchNativeFrames(
+  appId: string,
+  buildMode: BuildMode,
+  issueId: string,
+  eventId: string
+): Promise<NativeFramesResponse> {
+  const params = new URLSearchParams({ buildMode });
+  return fetchJson(`${issuesPath(appId, issueId)}/events/${encodeURIComponent(eventId)}/native-frames?${params}`);
 }
 
 export function updateIssueStatus(

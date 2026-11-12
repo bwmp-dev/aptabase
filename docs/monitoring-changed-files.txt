@@ -11,6 +11,7 @@ A	docs/javascript-sdk-probe.md
 A	docs/monitoring-changed-files.txt
 A	docs/monitoring-controls-api.md
 A	docs/monitoring-roadmap.md
+A	docs/native-symbols-api.md
 A	docs/sdk-native-assessment.md
 A	docs/sentry-compatibility.md
 M	etc/clickhouse/queries/get_error_count__v1.liquid
@@ -29,6 +30,7 @@ A	src/Data/Migrations/0018_ErrorContext.cs
 A	src/Data/Migrations/0019_ErrorOutbox.cs
 A	src/Data/Migrations/0020_SentryProjects.cs
 A	src/Data/Migrations/0021_MonitoringControls.cs
+A	src/Data/Migrations/0022_NativeSymbols.cs
 M	src/Features/ErrorReporting/Buffer/ErrorBackgroundWritter.cs
 A	src/Features/ErrorReporting/Buffer/ErrorOutbox.cs
 D	src/Features/ErrorReporting/Buffer/IErrorBuffer.cs
@@ -54,13 +56,20 @@ A	src/Features/Performance/TransactionBody.cs
 A	src/Features/Sentry/SentryController.cs
 A	src/Features/Sentry/SentryEnvelope.cs
 A	src/Features/Sentry/SentryIngestionKey.cs
+A	src/Features/Symbolication/ElfSymbols.cs
+A	src/Features/Symbolication/NativeFrame.cs
+A	src/Features/Symbolication/NativeSymbolProcessor.cs
+A	src/Features/Symbolication/NativeSymbolStore.cs
+A	src/Features/Symbolication/NativeSymbolsController.cs
 M	src/Program.cs
 A	src/e2e/fixture-api.ts
 A	src/e2e/issues.spec.ts
 A	src/e2e/monitoring.spec.ts
+A	src/e2e/native-symbols.spec.ts
 A	src/e2e/performance.spec.ts
 A	src/e2e/real/issues.real.spec.ts
 A	src/e2e/real/monitoring.real.spec.ts
+A	src/e2e/real/native-symbols.real.spec.ts
 A	src/e2e/real/performance.real.spec.ts
 A	src/e2e/real/real-host.ts
 A	src/e2e/shared-config.ts
@@ -79,6 +88,7 @@ A	src/webapp/features/analytics/errors/IssueSearch.tsx
 A	src/webapp/features/analytics/errors/IssueStatusBadge.tsx
 A	src/webapp/features/analytics/errors/IssuesList.test.tsx
 A	src/webapp/features/analytics/errors/IssuesList.tsx
+A	src/webapp/features/analytics/errors/NativeFrames.tsx
 A	src/webapp/features/analytics/errors/issues.ts
 M	src/webapp/features/analytics/mode/BuildModeSelector.tsx
 M	src/webapp/features/apps/SettingsPage.tsx
@@ -88,6 +98,8 @@ A	src/webapp/features/monitoring/ClearMonitoringData.tsx
 A	src/webapp/features/monitoring/MonitoringSettingsForm.tsx
 A	src/webapp/features/monitoring/MonitoringSettingsPanel.test.tsx
 A	src/webapp/features/monitoring/MonitoringSettingsPanel.tsx
+A	src/webapp/features/monitoring/NativeSymbols.test.tsx
+A	src/webapp/features/monitoring/NativeSymbols.tsx
 A	src/webapp/features/monitoring/SentryProjects.tsx
 A	src/webapp/features/monitoring/monitoring.ts
 M	src/webapp/features/navigation/NavMenu.tsx
@@ -111,9 +123,13 @@ M	tests/IntegrationTests/Clients/MailCatcher.cs
 M	tests/IntegrationTests/CustomWebApplicationFactory.cs
 A	tests/IntegrationTests/IssueIngestionTests.cs
 A	tests/IntegrationTests/IssueTrackingTests.cs
+A	tests/IntegrationTests/NativeSymbolTests.cs
+A	tests/IntegrationTests/NativeSymbolWorkerTests.cs
 A	tests/IntegrationTests/sequential.runsettings
 A	tests/MonitoringHost/MonitoringHost.csproj
 A	tests/MonitoringHost/MonitoringHostMain.cs
+A	tests/NativeSymbolFaultWorker/NativeSymbolFaultWorker.csproj
+A	tests/NativeSymbolFaultWorker/Program.cs
 A	tests/SdkProbes/Java/Probe.java
 A	tests/SdkProbes/Java/pom.xml
 A	tests/SdkProbes/Java/run.ps1
@@ -129,5 +145,9 @@ M	tests/UnitTests/Features/ErrorReporting/ErrorsControllerQuotaTests.cs
 A	tests/UnitTests/Features/ErrorReporting/IssueTests.cs
 M	tests/UnitTests/Features/ErrorReporting/PiiSanitizerTests.cs
 A	tests/UnitTests/Features/Performance/TransactionBodyTests.cs
+A	tests/UnitTests/Features/Sentry/ElfSymbolsTests.cs
+A	tests/UnitTests/Features/Sentry/NativeFrameTests.cs
 A	tests/UnitTests/Features/Sentry/SentryEnvelopeTests.cs
 A	tests/UnitTests/Features/Sentry/SentryIngestionKeyTests.cs
+A	tools/NativeSymbolWorker/NativeSymbolWorker.csproj
+A	tools/NativeSymbolWorker/Program.cs

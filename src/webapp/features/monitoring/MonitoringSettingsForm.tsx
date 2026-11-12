@@ -54,7 +54,11 @@ export function MonitoringSettingsForm({ appId, settings }: Props) {
     mutationFn: (next: MonitoringSettings) => saveSettings(appId, next),
     onSuccess: (saved) => {
       queryClient.setQueryData(monitoringKeys.settings(appId), saved);
-      return queryClient.invalidateQueries({ queryKey: monitoringKeys.data(appId) });
+      // Symbol expiry follows retention, and ready rows are no longer polled, so a shorter retention must refetch them.
+      return Promise.all([
+        queryClient.invalidateQueries({ queryKey: monitoringKeys.data(appId) }),
+        queryClient.invalidateQueries({ queryKey: monitoringKeys.allNativeSymbols(appId) }),
+      ]);
     },
   });
 

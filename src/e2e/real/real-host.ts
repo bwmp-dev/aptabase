@@ -1,5 +1,6 @@
 import { APIRequestContext, BrowserContext, Page, expect, test as base } from "@playwright/test";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { artifactsDir, waitForPageFadeIn } from "../shared-config";
 
@@ -10,6 +11,8 @@ type BuildMode = "release" | "debug";
 
 export const APP_ID = "test-app";
 export const APP_KEY = "TEST-APP-KEY";
+// Synthetic ARM64 library built with the installed NDK; uploaded as data only, never executed.
+export const PROBE_PATH = fileURLToPath(new URL("../../../tests/SdkProbes/Native/bin/probe.so", import.meta.url));
 
 export const test = base.extend<{ blockedExternal: string[] }>({
   // Automatic so every test's browser traffic stays on the loopback host.
@@ -48,6 +51,8 @@ export async function reportError(
     timestamp?: string;
     release?: string;
     environment?: string;
+    eventId?: string;
+    nativeFrames?: { buildId: string; address: string }[];
   }
 ) {
   const response = await request.post("/api/v0/error", {
@@ -68,6 +73,19 @@ export async function reportError(
     },
   });
   expect(response.status(), await response.text()).toBe(202);
+}
+
+const settingsPath = `/api/v0/apps/${APP_ID}/monitoring/settings`;
+
+// Monitoring settings are app-wide, so tests that change them restore what they found.
+export async function withSettings(request: APIRequestContext, run: (original: Record<string, unknown>) => Promise<void>) {
+  const original = await (await request.get(settingsPath)).json();
+  try {
+    await run(original);
+  } finally {
+    const restored = await request.put(settingsPath, { data: original });
+    expect(restored.status(), "restore monitoring settings").toBe(200);
+  }
 }
 
 type SpanInput = {

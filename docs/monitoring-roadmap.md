@@ -1,5 +1,7 @@
 # Aptabase monitoring roadmap
 
+Current phase: owner-approved text reports plus owner-uploaded symbols; no raw dumps. ARM64 ELF function-only backend now has app/build-scoped storage, owner authorization, isolated bounded processing, retention/purge and read-time diagnostic resolution.302 unit tests and76 full integration tests passed (0failed/skipped), including real worker failure/timeout cleanup. Opus frontend integration passed97unit tests, typecheck/build,34mocked and34real headless tests; local function-only phase acceptance is closed. See `native-symbols-api.md` for the current contract and ledger. All later "final" sections below describe earlier checkpoints, not blanket completion of mobile/native monitoring.
+
 Status: continuing SDK/native-readiness work after accepted checkpoint `7424a81` on `feat/error-issues`. The checkpoint ledger below is historical, not a declaration that all desktop/mobile monitoring work is finished. Owner-confirmed target: self-hosted desktop/mobile application errors and app performance. Website uptime, hosted SaaS expansion and billing features are out of scope. This is not a promise of full GlitchTip or Sentry parity. Existing Aptabase analytics, authentication, app ownership/sharing, ClickHouse and Tinybird support remain intact.
 
 ## Assessment (2026-11-11)
@@ -69,6 +71,18 @@ Rate/threshold rules, external delivery queues/backoff and channel configuration
 - [x] Desktop/mobile instrumentation docs and examples explaining stable operation names, sampling, monotonic durations, offline retry IDs and privacy boundaries.
 - [x] Headless frontend-to-backend tests and narrow/desktop visual checks with disposable local data.
 
+### 7. Text crash reports and owner-uploaded native symbols (approved)
+- [x] First verified format: ELF64 little-endian ARM64 shared library, exact GNU build ID and bounded sized functions; no raw dumps/archives accepted.
+- [x] Owner-only artifact metadata/upload/delete,8 MiB file/32 MiB app/8 artifact limits, app/build isolation, idempotency, private PostgreSQL contents and no binary API.
+- [x] Opt-in pinned-local-image worker with network disabled, readonly/non-root/capability and CPU/memory/PID limits,15-second deadline, bounded output, global single dispatcher and cleanup failure halt.
+- [x] Explicit bounded native frames through existing HTTP ingestion; original grouping and receipt/quota/outbox transaction preserved; exact-build function-only resolution with missing/expired/ambiguous states.
+- [x] Retention shortening/deletion/purge, malformed input/core rejection, concurrent budgets/workers, quota rollback, worker fault/cancel and existing full integration suite accepted locally.
+- [x] Opus owner controls, occurrence diagnostics, purge counts and desktop/mobile headless real acceptance:97unit/34mocked/34real tests, typecheck/build passed. Stale DSN assertions and retention-refresh regression fixed; final0failed/skipped.
+- [ ] Production deployment topology for worker isolation; Docker access is an explicit privileged operator prerequisite, not an automatic permission grant.
+- [ ] Android device crash capture/unwind/PC normalization and offline delivery; no device coverage inferred from a synthetic ELF.
+- [ ] Apple dSYM source artifacts/toolchain fixtures; no usable Apple host or fixture supplied. No dSYM support claim.
+- [ ] Source-line/inlining/demangling, R8 mappings, PDBs and server source maps need separate format-specific verified increments. Raw dumps remain a separately approved future policy/design.
+
 ## Owner decisions and scope boundaries
 
 Confirmed: self-hosted desktop/mobile app error tracking and performance; not hosted SaaS or website uptime. Preserve existing app authorization and quotas, but do not expand billing or SaaS features. No uptime monitors or public status pages are planned.
@@ -117,7 +131,7 @@ Passed after this fix: **286 unit tests**, both focused PostgreSQL/HTTP scenario
 
 Opus's Node10.77.1 strict-mode final acceptance passed twice on Windows/Node24.19.0 against backend `7f0685b`. The returned DSN string round-trips through the SDK's normal parser unchanged; handled error and transaction envelopes receive HTTP200, and an actual uncaught process exception is stored as fatal/unhandled before exit1. Local source mapping retained `thrower.ts` line12:11 from compiled line6 without `sourcesContent`; sensitive context and paths were excluded. Seven network/transport refusals self-test before sockets open, including HTTP, UDP and IPC. A test-guard bug where HTTP's `path:null` bypassed host checking was fixed and verified; recursive test-output cleanup now checks resolved paths and rejects reparse points. Node dependency tree is pinned to MIT/Apache-2.0 packages and installed without scripts; no 11.x CLI/FSL dependency was adopted. See `javascript-sdk-probe.md` for commands/evidence and limits. The test-only files are integrated locally; the removed diagnostic bypass is not supported setup.
 
-Final SDK increment acceptance: **286 backend unit tests and 74 full integration tests passed**, with real .NET6.10.0, Java8.64.0 and Node10.77.1 paths verified at their documented boundaries. Backend/MonitoringHost builds and the Node TypeScript fixture compilation passed. The unchanged dashboard's earlier62unit/26fixture/24real checks and typecheck/build were not repeated; they remain checkpoint evidence. Existing NuGet advisories remain. Electron, browser/renderer, React Native/Hermes, Android/iOS device lifecycle/native crash paths, offline mobile durability, AOT/trimming and production load remain unrun. The owner symbolication question is unanswered, and no binary/artifact intake was implemented. Temporary host/PostgreSQL are stopped after acceptance; ClickHouse/MailCatcher were already removed. No external alert sender exists, and no push/deployment/UI operation occurred.
+Final SDK increment acceptance: **286 backend unit tests and 74 full integration tests passed**, with real .NET6.10.0, Java8.64.0 and Node10.77.1 paths verified at their documented boundaries. Backend/MonitoringHost builds and the Node TypeScript fixture compilation passed. The unchanged dashboard's earlier62unit/26fixture/24real checks and typecheck/build were not repeated; they remain checkpoint evidence. Existing NuGet advisories remain. Electron, browser/renderer, React Native/Hermes, Android/iOS device lifecycle/native crash paths, offline mobile durability, AOT/trimming and production load remain unrun. At that SDK checkpoint the symbolication question was unanswered and no artifact intake existed. Owner approval and phase7 above supersede that historical boundary. Temporary host/PostgreSQL are stopped after acceptance; ClickHouse/MailCatcher were already removed. No external alert sender exists, and no push/deployment/UI operation occurred.
 
 ## Historical verification ledger (superseded by checkpoint acceptance below)
 
@@ -198,7 +212,7 @@ Post-integration backend review found that redaction markers could expand an acc
 - Actual Sentry .NET 6.10.0 error and transaction/span serialization, compression and auth are verified through TestServer/PostgreSQL. The standalone .NET instrumentation example built and ran offline. Raw ClickHouse duplicate-query fixture checks passed; the full suite now also exercises the actual 26.8 server. Hosted Tinybird was not executed.
 - All failures encountered during implementation were corrected and relevant checks rerun. Existing NU1902/NU1903 warnings for System.Security.Cryptography.Pkcs 10.0.0 remain; no dependency upgrade was silently bundled. A low-impact repeated header markup diagnostic remains in IssueDetailModal.
 - Not verified: physical Android/iOS devices, MAUI/Unity/native crash capture, minidumps/symbolication/source maps, other Sentry SDK versions/platforms, device-side offline queue durability/energy overhead, AOT/trimming, production deployment/load or hosted Tinybird. No blanket mobile SDK or Sentry compatibility claim.
-- Deliberately outside this scope: website uptime, SaaS/billing expansion, external alert channels/rate rules, profiling/replay, debug artifacts, distributed trace reconstruction, deployment history and retroactive deletion from delivered raw analytics. PostgreSQL monitoring cleanup explicitly excludes delivered raw logs under their existing 180-day TTL.
+- Deliberately outside that earlier checkpoint: website uptime, SaaS/billing expansion, external alert channels/rate rules, profiling/replay, debug artifacts, distributed trace reconstruction, deployment history and retroactive deletion from delivered raw analytics. PostgreSQL monitoring cleanup explicitly excludes delivered raw logs under their existing 180-day TTL.
 - Local alerts default disabled; the implementation has no external alert sender. Test emails went only to the temporary local catcher. All task-owned test hosts/containers were stopped and automatically removed; unrelated services were untouched. No push, PR or deployment.
 
 ### Reproduce the full integration run safely
@@ -210,3 +224,9 @@ dotnet test tests/IntegrationTests --no-restore -m:1 --settings tests/Integratio
 ```
 
 Full-suite results and final headless screenshots are local artifacts under `%TEMP%/aptabase-final-acceptance`; they are not committed. Initial 15-minute host expiry was an infrastructure interruption, not an accepted test failure; the bounded test host was extended to 45 minutes for combined acceptance and is now stopped.
+
+## Native-symbol increment acceptance (supersedes earlier checkpoint totals)
+
+Integrated locally on `feat/error-issues` at `D:\Coding\public\aptabase`: migration0022, private app/build artifacts, isolated bounded function reader, native text frames, retention/purge and owner/read-only diagnostics. Final backend302unit tests passed. Full integration76/76passed (40seconds,0failed/skipped), followed by final real worker1/1passed after self-watchdog addition. Frontend97unit,34fixture and34real headless tests passed; typecheck/build passed. Parent inspected desktop/mobile screenshots. Earlier2real DSN failures and2dependent skips are fixed and superseded by the final34/34 run. Setup, commands, test evidence, React Doctor warnings and exact unsupported formats are in `native-symbols-api.md`.
+
+Task-owned loopback host/PostgreSQL/ClickHouse/mail catcher and parser containers are stopped/removed. Worker scratch and synthetic probe copy cleaned; acceptance screenshots/TRX retained. No external alert channel was configured, permissions changed, upstream source copied, push/PR/deployment or visible UI used. Existing NuGet security advisories and one new low-impact component-complexity warning remain. Production worker topology, real Android crash capture/unwinding/address normalization, Apple fixtures/toolchain, source-line/inlining and other native formats are actual remaining work; raw dumps remain excluded pending a separate policy.

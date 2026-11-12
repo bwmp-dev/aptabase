@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ClearMonitoringData } from "./ClearMonitoringData";
 import { fetchSettings, monitoringKeys } from "./monitoring";
 import { MonitoringSettingsForm } from "./MonitoringSettingsForm";
+import { NativeSymbols } from "./NativeSymbols";
 import { SentryProjects } from "./SentryProjects";
 
 export function MonitoringSettingsPanel({ appId }: { appId: string }) {
@@ -39,6 +40,13 @@ export function MonitoringSettingsPanel({ appId }: { appId: string }) {
           Sentry SDK DSNs
         </h2>
         <SentryProjects appId={appId} />
+      </section>
+
+      <section aria-labelledby="native-symbols-heading" className="space-y-4 border-t pt-8">
+        <h2 id="native-symbols-heading" className="text-lg font-medium">
+          Native symbols
+        </h2>
+        <NativeSymbols appId={appId} retentionDays={data.monitoringRetentionDays} />
       </section>
 
       <section aria-labelledby="clear-monitoring-heading" className="space-y-4 border-t pt-8">

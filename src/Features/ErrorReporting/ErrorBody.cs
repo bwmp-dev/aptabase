@@ -13,6 +13,7 @@ public class ErrorBody
     public string? ErrorMessage { get; set; }
     public string? ErrorType { get; set; }
     public string? StackTrace { get; set; }
+    public List<Aptabase.Features.Symbolication.NativeFrame>? NativeFrames { get; set; }
     // Adapter-only grouping input preserves existing issue IDs as diagnostic locations improve.
     [System.Text.Json.Serialization.JsonIgnore]
     internal string? GroupingStackTrace { get; set; }
@@ -32,6 +33,8 @@ public class ErrorBody
 
     public bool IsValid()
     {
+        if (NativeFrames is not null && (EventId is null || NativeFrames.Count is < 1 or > 100 || NativeFrames.Any(f => f is null || !f.IsValid())))
+            return false;
         if (EventId is not null &&
             (!(Guid.TryParseExact(EventId, "D", out var id) || Guid.TryParseExact(EventId, "N", out id)) || id == Guid.Empty))
             return false;

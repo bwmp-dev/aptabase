@@ -24,6 +24,7 @@ public enum IssueRecordResult { Accepted, Duplicate, QuotaExceeded, AppUnavailab
 
 public class IssueEvent
 {
+    public bool HasNativeFrames { get; set; }
     public Guid EventId { get; set; }
     public DateTime Timestamp { get; set; }
     public string ErrorMessage { get; set; } = "";
@@ -100,6 +101,11 @@ public class IssueStore(IDbContext db) : IIssueStore
                 """, parameters, transaction, cancellationToken: cancellationToken));
             if (consumed == 0) return IssueRecordResult.QuotaExceeded;
         }
+
+        if (error.NativeFrames is not null) await connection.ExecuteAsync(new CommandDefinition(
+            "UPDATE error_receipts SET native_frames=CAST(@frames AS jsonb) WHERE app_id=@AppId AND is_debug=@IsDebug AND event_id=@eventId",
+            new { error.AppId, error.IsDebug, eventId = Guid.Parse(error.ErrorId), frames = JsonSerializer.Serialize(error.NativeFrames) },
+            transaction, cancellationToken: cancellationToken));
 
         var alertKind = await connection.ExecuteScalarAsync<string?>(new CommandDefinition("""
             INSERT INTO error_issues (app_id, is_debug, id, error_type, error_message, stack_trace, first_seen, last_seen)
@@ -221,7 +227,7 @@ public class IssueStore(IDbContext db) : IIssueStore
             AND (@environment IS NULL OR environment = @environment) AND (@release IS NULL OR release = @release)
             """;
         using var rows = await connection.QueryMultipleAsync(new CommandDefinition($"""
-            SELECT event_id, timestamp, error_message, stack_trace, release, environment, platform, os_name, os_version, sdk_version, severity, kind
+            SELECT event_id, timestamp, error_message, stack_trace, release, environment, platform, os_name, os_version, sdk_version, severity, kind, native_frames IS NOT NULL AS has_native_frames
             FROM error_receipts WHERE {where} ORDER BY timestamp DESC, event_id LIMIT @limit OFFSET @offset;
             SELECT COUNT(*) FROM error_receipts WHERE {where};
             """, new { appId, isDebug, id, offset, limit, environment, release }, transaction, cancellationToken: cancellationToken));

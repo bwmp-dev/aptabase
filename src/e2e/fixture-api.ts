@@ -7,7 +7,15 @@ const APP_ID = "fixture-app";
 
 type BuildMode = "release" | "debug";
 type Reply = { status: number; body?: unknown };
-type ApiRequest = { method: string; url: URL; body: unknown };
+type ApiRequest = { method: string; url: URL; body: unknown; contentType?: string };
+type SymbolArtifact = {
+  id: string;
+  buildId: string | null;
+  status: "pending" | "ready" | "invalid";
+  sizeBytes: number;
+  createdAt: string;
+  expiresAt: string;
+};
 type Interceptor = (request: ApiRequest) => Reply | undefined | Promise<Reply | undefined>;
 
 function sampleIssue(overrides: Partial<Issue> & Pick<Issue, "id">): Issue {
@@ -96,6 +104,7 @@ const sampleEvents = [
     sdkVersion: "aptabase-electron@0.4.0",
     severity: "error",
     kind: "handled",
+    hasNativeFrames: false,
   },
   {
     eventId: "0b6f3a7c-1d2e-4f50-8a9b-0c1d2e3f4a02",
@@ -110,8 +119,49 @@ const sampleEvents = [
     sdkVersion: "aptabase-electron@0.4.0",
     severity: "error",
     kind: "handled",
+    hasNativeFrames: false,
   },
 ];
+
+// Sample synthetic values matching the NDK probe library used by the real-host checks.
+export const PROBE_BUILD_ID = "bbe2c0d49e25325c5e51f939ec1eac37cc159800";
+export const PROBE_FUNCTION = "aptabase_symbol_probe";
+const PROBE_FUNCTION_START = 0x2dc;
+const PROBE_FUNCTION_SIZE = 24;
+const UNKNOWN_BUILD_ID = "0123456789abcdef0123456789abcdef01234567";
+export const NATIVE_EVENT_ID = "0b6f3a7c-1d2e-4f50-8a9b-0c1d2e3f4a03";
+
+const nativeEvent = {
+  eventId: NATIVE_EVENT_ID,
+  timestamp: "2026-11-09T07:45:00Z",
+  errorMessage: "SIGSEGV in native module",
+  stackTrace: `at native ${PROBE_BUILD_ID}+0x2e0\nat native ${UNKNOWN_BUILD_ID}+0x1a40`,
+  release: "2.4.0",
+  environment: "production",
+  platform: "desktop",
+  osName: "Linux",
+  osVersion: "6.8",
+  sdkVersion: "aptabase-electron@0.4.0",
+  severity: "fatal",
+  kind: "crash",
+  hasNativeFrames: true,
+};
+
+const nativeFrames = [
+  { buildId: PROBE_BUILD_ID, address: "0x2e0" },
+  { buildId: UNKNOWN_BUILD_ID, address: "0x1a40" },
+];
+
+export function readyProbeArtifact(): SymbolArtifact {
+  return {
+    id: "c7d1e2f3-0000-4000-8000-0000000000a1",
+    buildId: PROBE_BUILD_ID,
+    status: "ready",
+    sizeBytes: 6144,
+    createdAt: "2026-11-11T08:00:00Z",
+    expiresAt: "2026-12-11T08:00:00Z",
+  };
+}
 
 const sampleGroups = [
   { name: "app.startup", operation: "ui.load", count: 640, errorCount: 4, avgMs: 412, p50Ms: 380, p95Ms: 910 },
@@ -192,8 +242,20 @@ export class FixtureApi {
     { eventId: "8a7b6c5d-4e3f-4a1b-9c2d-000000000002", issueId: fingerprint("b"), kind: "new_issue", createdAt: "2026-11-05T12:00:00Z", readAt: "2026-11-06T08:00:00Z" as string | null },
   ];
   cleared = false;
+  symbolsEnabled = true;
+  nativeSymbols: Record<BuildMode, SymbolArtifact[]> = { release: [], debug: [] };
+  private uploadCount = 0;
   interceptor: Interceptor | undefined;
   private issues = sampleIssues();
+
+  // Stands in for the isolated processor finishing validation of every pending upload.
+  validatePendingSymbols() {
+    for (const artifact of [...this.nativeSymbols.release, ...this.nativeSymbols.debug]) {
+      if (artifact.status !== "pending") continue;
+      artifact.status = "ready";
+      artifact.buildId = PROBE_BUILD_ID;
+    }
+  }
 
   listRequests() {
     return this.requests
@@ -247,14 +309,21 @@ export class FixtureApi {
       const spans = transaction?.name === "deep.tree" ? deepSpans : sampleSpans;
       return transaction ? { status: 200, body: { transaction, spans } } : { status: 404 };
     }
+    if (url.pathname === `${appBase}/native-symbols` || url.pathname.startsWith(`${appBase}/native-symbols/`)) {
+      return this.symbols(request, url.pathname.slice(`${appBase}/native-symbols`.length));
+    }
     if (url.pathname.startsWith(`${appBase}/monitoring/`) || url.pathname === `${appBase}/sentry-projects`) {
       return this.monitoring(method, url.pathname.slice(appBase.length), request.body);
     }
 
     const issuesBase = `${appBase}/issues`;
     if (url.pathname === issuesBase && method === "GET") return this.list(url);
+    if (method === "GET" && url.pathname.startsWith(`${issuesBase}/`) && url.pathname.endsWith("/native-frames")) {
+      return this.frames(url);
+    }
     if (method === "GET" && url.pathname.startsWith(`${issuesBase}/`) && url.pathname.endsWith("/events")) {
-      return { status: 200, body: { events: sampleEvents, pagination: { offset: 0, limit: 10, total: sampleEvents.length } } };
+      const events = [...sampleEvents, nativeEvent];
+      return { status: 200, body: { events, pagination: { offset: 0, limit: 10, total: events.length } } };
     }
     if (url.pathname.startsWith(`${issuesBase}/`)) {
       const issueId = url.pathname.slice(issuesBase.length + 1);
@@ -277,8 +346,8 @@ export class FixtureApi {
     }
     if (path === "/monitoring/data" && method === "GET") {
       const counts = this.cleared
-        ? { issues: 0, events: 0, transactions: 0, queued: 0, alerts: 0 }
-        : { issues: 3, events: 1330, transactions: 3, queued: 0, alerts: this.alerts.length };
+        ? { issues: 0, events: 0, transactions: 0, queued: 0, alerts: 0, symbols: 0 }
+        : { issues: 3, events: 1330, transactions: 3, queued: 0, alerts: this.alerts.length, symbols: this.symbolCount() };
       return { status: 200, body: { counts, excludesDeliveredRawLogs: true } };
     }
     if (path === "/monitoring/data" && method === "DELETE") {
@@ -286,6 +355,7 @@ export class FixtureApi {
       if (captureErrors || capturePerformance || forwardRawErrors) return { status: 409 };
       if ((body as { confirmAppId?: string })?.confirmAppId !== APP_ID) return { status: 400 };
       this.cleared = true;
+      this.nativeSymbols = { release: [], debug: [] };
       return { status: 204 };
     }
     if (path === "/monitoring/alerts" && method === "GET") {
@@ -308,6 +378,61 @@ export class FixtureApi {
     }
     this.unexpected.push(`${method} ${path}`);
     return { status: 404 };
+  }
+
+  private symbolCount() {
+    return this.nativeSymbols.release.length + this.nativeSymbols.debug.length;
+  }
+
+  private symbols(request: ApiRequest, path: string): Reply {
+    if (!this.canManage) return { status: 403 };
+    const mode = this.scope(request.url);
+    const limits = { maxArtifactBytes: 8388608, maxAppBytes: 33554432, maxAppArtifacts: 8 };
+    if (path === "" && request.method === "GET") {
+      return { status: 200, body: { enabled: this.symbolsEnabled, artifacts: this.nativeSymbols[mode], limits } };
+    }
+    if (path === "" && request.method === "POST") {
+      if (!this.symbolsEnabled) return { status: 503 };
+      if (request.contentType !== "application/octet-stream") return { status: 415 };
+      if (!Buffer.isBuffer(request.body) || request.body.length === 0) return { status: 400 };
+      if (this.symbolCount() >= limits.maxAppArtifacts) return { status: 409 };
+      this.uploadCount += 1;
+      const artifact: SymbolArtifact = {
+        id: `d8e9f0a1-0000-4000-8000-${this.uploadCount.toString().padStart(12, "0")}`,
+        buildId: null,
+        status: "pending",
+        sizeBytes: request.body.length,
+        createdAt: "2026-11-11T15:00:00Z",
+        expiresAt: "2026-12-11T15:00:00Z",
+      };
+      this.nativeSymbols[mode] = [artifact, ...this.nativeSymbols[mode]];
+      return { status: 202, body: { artifact } };
+    }
+    if (path.startsWith("/") && request.method === "DELETE") {
+      const id = decodeURIComponent(path.slice(1));
+      if (!this.nativeSymbols[mode].some((a) => a.id === id)) return { status: 404 };
+      this.nativeSymbols[mode] = this.nativeSymbols[mode].filter((a) => a.id !== id);
+      return { status: 204 };
+    }
+    this.unexpected.push(`${request.method} ${request.url.pathname}`);
+    return { status: 404 };
+  }
+
+  // Readers may see frames; resolution is computed at read time from ready artifacts, like the backend contract.
+  private frames(url: URL): Reply {
+    if (!url.pathname.includes(`/events/${NATIVE_EVENT_ID}/`)) return { status: 404 };
+    const ready = this.nativeSymbols[this.scope(url)].filter((a) => a.status === "ready");
+    const frames = nativeFrames.map((frame) => {
+      const address = parseInt(frame.address, 16);
+      const matches = ready.filter((a) => a.buildId === frame.buildId);
+      const inside =
+        matches.length === 1 && address >= PROBE_FUNCTION_START && address < PROBE_FUNCTION_START + PROBE_FUNCTION_SIZE;
+      if (matches.length > 1) return { ...frame, status: "ambiguous", function: null, offset: null };
+      return inside
+        ? { ...frame, status: "resolved", function: PROBE_FUNCTION, offset: address - PROBE_FUNCTION_START }
+        : { ...frame, status: "unresolved", function: null, offset: null };
+    });
+    return { status: 200, body: { capability: "function-only", frames } };
   }
 
   private performanceSummary(url: URL): Reply {
@@ -377,11 +502,14 @@ async function routeAll(context: BrowserContext, api: FixtureApi, baseURL: strin
     }
     if (!url.pathname.startsWith("/api/")) return route.continue();
 
-    const postData = request.postData();
+    const contentType = request.headers()["content-type"];
+    const binary = contentType === "application/octet-stream";
+    const postData = binary ? null : request.postData();
     const reply = await api.handle({
       method: request.method(),
       url,
-      body: postData ? JSON.parse(postData) : null,
+      contentType,
+      body: binary ? request.postDataBuffer() : postData ? JSON.parse(postData) : null,
     });
     return route.fulfill({
       status: reply.status,

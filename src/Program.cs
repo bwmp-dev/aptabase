@@ -166,6 +166,9 @@ public partial class Program
         builder.Services.AddSingleton<ErrorIngestionService>();
         builder.Services.AddHostedService<PurgeErrorReceiptsJob>();
         builder.Services.AddSingleton<PerformanceStore>();
+        builder.Services.AddSingleton<Aptabase.Features.Symbolication.INativeSymbolProcessor,Aptabase.Features.Symbolication.NativeSymbolProcessor>();
+        builder.Services.AddSingleton<Aptabase.Features.Symbolication.NativeSymbolStore>();
+        builder.Services.AddHostedService<Aptabase.Features.Symbolication.NativeSymbolJob>();
         builder.Services.AddHostedService<PurgeTransactionsJob>();
         builder.Services.AddSingleton<IPiiSanitizer, PiiSanitizer>();
         builder.Services.AddHostedService<EventBackgroundWritter>();

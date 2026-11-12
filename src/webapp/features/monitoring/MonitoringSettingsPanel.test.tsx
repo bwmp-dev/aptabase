@@ -30,7 +30,7 @@ function defaultReply(url: URL, init?: RequestInit): Reply {
     return { status: 200, body: settings };
   }
   if (path === "/monitoring/data" && method === "GET") {
-    return { status: 200, body: { counts: { issues: 4, events: 120, transactions: 900, queued: 2, alerts: 3 }, excludesDeliveredRawLogs: true } };
+    return { status: 200, body: { counts: { issues: 4, events: 120, transactions: 900, queued: 2, alerts: 3, symbols: 5 }, excludesDeliveredRawLogs: true } };
   }
   if (path === "/monitoring/data" && method === "DELETE") return { status: 204 };
   if (path === "/sentry-projects" && method === "GET") return { status: 200, body: { projects } };
@@ -156,6 +156,8 @@ describe("MonitoringSettingsPanel clear data", () => {
     const section = await screen.findByRole("region", { name: "Clear monitoring data" });
 
     expect(await within(section).findByText("900")).toBeTruthy();
+    expect(within(section).getByText("Native symbol files").nextElementSibling?.textContent).toBe("5");
+    expect(section.textContent).toContain("local alerts and native symbol files from this server's PostgreSQL database");
     expect((within(section).getByRole("textbox") as HTMLInputElement).disabled).toBe(true);
     expect((within(section).getByRole("button", { name: "Clear monitoring data" }) as HTMLButtonElement).disabled).toBe(true);
     expect(section.textContent).toContain("first turn off error capture, performance capture and raw log forwarding");

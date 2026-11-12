@@ -11,7 +11,7 @@ export interface MonitoringSettings {
 }
 
 export interface MonitoringDataPreview {
-  counts: { issues: number; events: number; transactions: number; queued: number; alerts: number };
+  counts: { issues: number; events: number; transactions: number; queued: number; alerts: number; symbols: number };
   excludesDeliveredRawLogs: boolean;
 }
 
@@ -36,6 +36,29 @@ export interface SentryProject {
   dsn: string;
 }
 
+export type NativeSymbolStatus = "pending" | "ready" | "invalid";
+
+export interface NativeSymbolArtifact {
+  id: string;
+  buildId: string | null;
+  status: NativeSymbolStatus;
+  sizeBytes: number;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface NativeSymbolLimits {
+  maxArtifactBytes: number;
+  maxAppBytes: number;
+  maxAppArtifacts: number;
+}
+
+export interface NativeSymbolsResponse {
+  enabled: boolean;
+  artifacts: NativeSymbolArtifact[];
+  limits: NativeSymbolLimits;
+}
+
 export const RETENTION_DAYS = { min: 1, max: 30 } as const;
 export const COOLDOWN_MINUTES = { min: 1, max: 1440 } as const;
 export const ALERTS_PAGE_SIZE = 50;
@@ -45,6 +68,8 @@ export const monitoringKeys = {
   settings: (appId: string) => [...monitoringKeys.app(appId), "settings"] as const,
   data: (appId: string) => [...monitoringKeys.app(appId), "data"] as const,
   sentry: (appId: string) => [...monitoringKeys.app(appId), "sentry"] as const,
+  allNativeSymbols: (appId: string) => [...monitoringKeys.app(appId), "native-symbols"] as const,
+  nativeSymbols: (appId: string, buildMode: BuildMode) => [...monitoringKeys.allNativeSymbols(appId), buildMode] as const,
   alerts: (appId: string, buildMode: BuildMode) => [...monitoringKeys.app(appId), "alerts", buildMode] as const,
   alertsPage: (appId: string, buildMode: BuildMode, offset: number) =>
     [...monitoringKeys.alerts(appId, buildMode), offset] as const,
@@ -88,4 +113,26 @@ export function fetchSentryProjects(appId: string) {
 
 export function createSentryProjects(appId: string) {
   return fetchJson<{ projects: SentryProject[] }>(`${appPath(appId)}/sentry-projects`, { method: "POST" });
+}
+
+export function fetchNativeSymbols(appId: string, buildMode: BuildMode) {
+  const params = new URLSearchParams({ buildMode });
+  return fetchJson<NativeSymbolsResponse>(`${appPath(appId)}/native-symbols?${params}`);
+}
+
+// The raw bytes are the whole body: no multipart wrapper, so no client filename or path is sent.
+export function uploadNativeSymbols(appId: string, buildMode: BuildMode, file: Blob) {
+  const params = new URLSearchParams({ buildMode });
+  return fetchJson<{ artifact: NativeSymbolArtifact }>(`${appPath(appId)}/native-symbols?${params}`, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/octet-stream" },
+    body: file,
+  });
+}
+
+export function deleteNativeSymbols(appId: string, buildMode: BuildMode, id: string) {
+  const params = new URLSearchParams({ buildMode });
+  return fetchNoContent(`${appPath(appId)}/native-symbols/${encodeURIComponent(id)}?${params}`, {
+    method: "DELETE",
+  });
 }
