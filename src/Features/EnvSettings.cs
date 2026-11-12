@@ -34,6 +34,8 @@ public class EnvSettings
     // Variable Name: AUTH_SECRET
     public byte[] AuthSecret { get; private set; } = [];
 
+    public string DataProtectionKeysDirectory { get; private set; } = "";
+
     public string? MailCatcherConnectionString { get; private set; }
 
     // The host of the SMTP server
@@ -103,7 +105,8 @@ public class EnvSettings
         {
             IsDevelopment = isDevelopment,
             Region = region,
-            SelfBaseUrl = NormalizeBaseUrl(MustGet("BASE_URL")),
+            SelfBaseUrl = NormalizeBaseUrl(MustGet("BASE_URL"), isDevelopment),
+            DataProtectionKeysDirectory = ValidateKeyDirectory(Get("DATA_PROTECTION_KEYS_DIRECTORY")),
             ConnectionString = GetOrNull("ConnectionStrings__postgresdb") ?? MustGet("DATABASE_URL"),
             ClickHouseConnectionString = GetOrNull("ConnectionStrings__clickhousedb") ?? Get("CLICKHOUSE_URL"),
             TinybirdBaseUrl = Get("TINYBIRD_BASE_URL"),
@@ -195,7 +198,7 @@ public class EnvSettings
         return Environment.GetEnvironmentVariable(name) ?? throw new Exception($"Missing {name} environment variable");
     }
 
-    private static string NormalizeBaseUrl(string baseUrl)
+    public static string NormalizeBaseUrl(string baseUrl, bool isDevelopment)
     {
         var value = baseUrl.Trim().TrimEnd('/');
         if (string.IsNullOrWhiteSpace(value))
@@ -207,9 +210,22 @@ public class EnvSettings
             value = $"https://{value}";
         }
 
-        if (!Uri.TryCreate(value, UriKind.Absolute, out _))
-            throw new Exception("BASE_URL must be an absolute URL, e.g. https://analytics.yourdomain.com");
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
+            uri.Scheme is not ("http" or "https") || string.IsNullOrEmpty(uri.Host) ||
+            !string.IsNullOrEmpty(uri.UserInfo) || uri.AbsolutePath != "/" ||
+            !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
+            throw new Exception("BASE_URL must be an HTTP(S) origin without credentials, path, query or fragment.");
+        if (!isDevelopment && uri.Scheme != "https")
+            throw new Exception("BASE_URL must use HTTPS outside Development; terminate TLS at the private reverse proxy.");
 
         return value;
+    }
+
+    public static string ValidateKeyDirectory(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "";
+        if (!Path.IsPathFullyQualified(value))
+            throw new Exception("DATA_PROTECTION_KEYS_DIRECTORY must be an absolute private persistent directory.");
+        return Path.GetFullPath(value);
     }
 }

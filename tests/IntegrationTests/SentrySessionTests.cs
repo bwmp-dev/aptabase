@@ -50,7 +50,8 @@ public class SentrySessionTests
             var other = projects.Single(p => p.AppId == "session-b");
             var env = (EnvSettings)Activator.CreateInstance(typeof(EnvSettings), nonPublic: true)!;
             typeof(EnvSettings).GetProperty(nameof(EnvSettings.ErrorQuotaEnabled))!.SetValue(env, true);
-            var builder = WebApplication.CreateBuilder();
+            // Other production/login fixtures mutate process environment; keep exception assertions independent of test order.
+            var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Production" });
             builder.WebHost.UseTestServer();
             builder.Services.AddSingleton(env);
             builder.Services.AddSingleton<IDbContext>(db);

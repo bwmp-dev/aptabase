@@ -18,6 +18,73 @@ namespace Aptabase.IntegrationTests;
 
 public class MonitoringRecoveryTests(ITestOutputHelper output)
 {
+    [AnalyticsRecoveryFact]
+    public async Task ClickHouse_Backup_Restores_Analytics_Raw_Errors_Views_And_Ttl()
+    {
+        var container = Environment.GetEnvironmentVariable("APTABASE_ANALYTICS_RECOVERY_CONTAINER")!;
+        Assert.Matches("\\A[a-f0-9]{64}\\z", container);
+        var settings = new System.Data.Common.DbConnectionStringBuilder {
+            ConnectionString = Environment.GetEnvironmentVariable("APTABASE_TEST_CLICKHOUSE_URL")!
+        };
+        Assert.Equal("127.0.0.1", settings["Host"]);
+        using var inspected = JsonDocument.Parse(await Docker("inspect", container));
+        var instance = inspected.RootElement[0];
+        Assert.Equal("production-acceptance", instance.GetProperty("Config").GetProperty("Labels").GetProperty("aptabase.test").GetString());
+        var binding = Assert.Single(instance.GetProperty("NetworkSettings").GetProperty("Ports").GetProperty("8123/tcp").EnumerateArray());
+        Assert.Equal("127.0.0.1", binding.GetProperty("HostIp").GetString());
+        Assert.Equal(settings["Port"].ToString(), binding.GetProperty("HostPort").GetString());
+        var token = Guid.NewGuid().ToString("N");
+        var original = "aptabase_backup_" + token;
+        var restored = "aptabase_restore_" + token;
+        var archive = "backups/aptabase-recovery-" + token + ".zip";
+        var archiveFile = "/var/lib/clickhouse/backups/" + archive;
+        await using var admin = new ClickHouse.Client.ADO.ClickHouseConnection(settings.ConnectionString);
+        await admin.OpenAsync();
+        await admin.ExecuteAsync($"CREATE DATABASE {original}");
+        try
+        {
+            settings["Database"] = original;
+            await using var source = new ClickHouse.Client.ADO.ClickHouseConnection(settings.ConnectionString);
+            await source.OpenAsync();
+            foreach (var path in Directory.GetFiles(Path.Combine(AppContext.BaseDirectory, "etc", "clickhouse"), "*.sql").Order())
+                await source.ExecuteAsync(await File.ReadAllTextAsync(path));
+            await source.ExecuteAsync("""
+                INSERT INTO events (app_id,timestamp,event_name,user_id,session_id,ttl)
+                VALUES ('synthetic-app',now(),'startup','synthetic-user','synthetic-session',now()+INTERVAL 180 DAY)
+                """);
+            await source.ExecuteAsync("""
+                INSERT INTO error_events (error_id,app_id,timestamp,error_message,error_type,stack_trace,severity,kind,ttl)
+                VALUES ('synthetic-error','synthetic-app',now(),'Synthetic failure','ProbeError','at SyntheticProbe:353:17','error','unhandled',now()+INTERVAL 180 DAY)
+                """);
+            var eventsBefore = await source.ExecuteScalarAsync<string>("SELECT groupArray(tuple(*))::String FROM events");
+            var errorsBefore = await source.ExecuteScalarAsync<string>("SELECT groupArray(tuple(*))::String FROM error_events");
+            var backup = await admin.QuerySingleAsync<BackupStatus>($"BACKUP DATABASE {original} TO File('{archive}')");
+            Assert.Equal("BACKUP_CREATED", backup.Status);
+            var checksum = (await Docker("exec", container, "sha256sum", archiveFile)).Split(' ')[0];
+            Assert.Matches("\\A[a-f0-9]{64}\\z", checksum);
+            var restore = await admin.QuerySingleAsync<BackupStatus>($"RESTORE DATABASE {original} AS {restored} FROM File('{archive}')");
+            Assert.Equal("RESTORED", restore.Status);
+            settings["Database"] = restored;
+            await using var recovered = new ClickHouse.Client.ADO.ClickHouseConnection(settings.ConnectionString);
+            await recovered.OpenAsync();
+            Assert.Equal(eventsBefore, await recovered.ExecuteScalarAsync<string>("SELECT groupArray(tuple(*))::String FROM events"));
+            Assert.Equal(errorsBefore, await recovered.ExecuteScalarAsync<string>("SELECT groupArray(tuple(*))::String FROM error_events"));
+            Assert.Equal(1, await recovered.ExecuteScalarAsync<long>("SELECT countMerge(events) FROM monthly_usage_v1"));
+            Assert.Equal(1, await recovered.ExecuteScalarAsync<long>("SELECT countMerge(events_count) FROM sessions_live_v1"));
+            foreach (var table in new[] { "events", "error_events" })
+                Assert.Contains("TTL ttl", await recovered.ExecuteScalarAsync<string>($"SHOW CREATE TABLE {table}"));
+            await admin.ExecuteAsync($"DROP DATABASE {original} SYNC");
+            Assert.Equal(1, await recovered.ExecuteScalarAsync<long>("SELECT countMerge(events) FROM monthly_usage_v1"));
+            output.WriteLine($"PASS synthetic ClickHouse archive SHA256={checksum}; analytics/raw-error rows, both views and TTL definitions restored independently.");
+        }
+        finally
+        {
+            await admin.ExecuteAsync($"DROP DATABASE IF EXISTS {original} SYNC");
+            await admin.ExecuteAsync($"DROP DATABASE IF EXISTS {restored} SYNC");
+            await Docker("exec", container, "rm", "-f", archiveFile);
+        }
+    }
+
     [MonitoringRecoveryFact]
     public async Task Postgres_Backup_Restores_Monitoring_Data_Identity_Permissions_And_Deduplication()
     {
@@ -133,6 +200,11 @@ public class MonitoringRecoveryTests(ITestOutputHelper output)
         }
     }
 
+    private sealed class BackupStatus
+    {
+        public string Status { get; set; } = "";
+    }
+
     private static async Task<SortedDictionary<string, string>> TableHashes(System.Data.Common.DbConnection connection)
     {
         var hashes = new SortedDictionary<string, string>(StringComparer.Ordinal);
@@ -166,5 +238,14 @@ public sealed class MonitoringRecoveryFactAttribute : FactAttribute
     {
         if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("APTABASE_RECOVERY_CONTAINER")))
             Skip = "Requires an explicitly labelled disposable PostgreSQL container for backup/restore acceptance.";
+    }
+}
+
+public sealed class AnalyticsRecoveryFactAttribute : FactAttribute
+{
+    public AnalyticsRecoveryFactAttribute()
+    {
+        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("APTABASE_ANALYTICS_RECOVERY_CONTAINER")))
+            Skip = "Requires an explicitly labelled disposable ClickHouse container with local backup support.";
     }
 }

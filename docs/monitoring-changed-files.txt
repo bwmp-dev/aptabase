@@ -7,12 +7,15 @@ M	.github/workflows/ci.yml
 A	docs/app-performance-api.md
 A	docs/desktop-mobile-instrumentation.md
 M	docs/error-api-openapi.yaml
+A	docs/glitchtip-history-preservation.md
 A	docs/glitchtip-retirement-readiness.md
 A	docs/javascript-sdk-probe.md
+A	docs/maui-unhandled-manual-test.md
 A	docs/monitoring-changed-files.txt
 A	docs/monitoring-controls-api.md
 A	docs/monitoring-roadmap.md
 A	docs/native-symbols-api.md
+A	docs/production-acceptance.md
 A	docs/sdk-native-assessment.md
 A	docs/sentry-compatibility.md
 A	docs/session-health-api.md
@@ -37,6 +40,7 @@ A	src/Data/Migrations/0021_MonitoringControls.cs
 A	src/Data/Migrations/0022_NativeSymbols.cs
 A	src/Data/Migrations/0023_EraseProcessedSymbolBytes.cs
 A	src/Data/Migrations/0024_SentrySessionHealth.cs
+M	src/Features/EnvSettings.cs
 M	src/Features/ErrorReporting/Buffer/ErrorBackgroundWritter.cs
 A	src/Features/ErrorReporting/Buffer/ErrorOutbox.cs
 D	src/Features/ErrorReporting/Buffer/IErrorBuffer.cs
@@ -54,6 +58,7 @@ M	src/Features/ErrorReporting/PiiSanitizer.cs
 A	src/Features/ErrorReporting/PiiSanitizerExtensions.cs
 A	src/Features/ErrorReporting/PurgeErrorReceiptsJob.cs
 A	src/Features/Monitoring/MonitoringController.cs
+A	src/Features/Monitoring/StorageReadinessCheck.cs
 A	src/Features/Performance/PerformanceController.cs
 A	src/Features/Performance/PerformanceStore.cs
 A	src/Features/Performance/PurgeTransactionsJob.cs
@@ -146,6 +151,7 @@ A	tests/IntegrationTests/IssueTrackingTests.cs
 A	tests/IntegrationTests/MonitoringRecoveryTests.cs
 A	tests/IntegrationTests/NativeSymbolTests.cs
 A	tests/IntegrationTests/NativeSymbolWorkerTests.cs
+A	tests/IntegrationTests/ProductionAcceptanceTests.cs
 A	tests/IntegrationTests/SentrySessionTests.cs
 A	tests/IntegrationTests/sequential.runsettings
 A	tests/MonitoringHost/MonitoringHost.csproj
@@ -191,6 +197,7 @@ M	tests/UnitTests/Features/ErrorReporting/ErrorsControllerQuotaTests.cs
 A	tests/UnitTests/Features/ErrorReporting/IssueTests.cs
 M	tests/UnitTests/Features/ErrorReporting/PiiSanitizerTests.cs
 A	tests/UnitTests/Features/Performance/TransactionBodyTests.cs
+A	tests/UnitTests/Features/ProductionConfigurationTests.cs
 A	tests/UnitTests/Features/Sentry/ElfSymbolsTests.cs
 A	tests/UnitTests/Features/Sentry/NativeFrameTests.cs
 A	tests/UnitTests/Features/Sentry/NativeSourceOutputTests.cs

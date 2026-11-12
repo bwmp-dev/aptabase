@@ -13,6 +13,9 @@ using Aptabase.Features.GeoIP;
 using Aptabase.Features.Ingestion;
 using Aptabase.Features.Ingestion.Buffer;
 using Aptabase.Features.Notification;
+using Aptabase.Features.Monitoring;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.DataProtection;
 using Aptabase.Features.Privacy;
 using Aptabase.Features.Stats;
 using ClickHouse.Client.ADO;
@@ -73,6 +76,11 @@ public partial class Program
         {
             builder.Services.AddDataProtection()
                             .PersistKeysToAWSSystemsManager("/aptabase/production/aspnet-dataprotection/");
+        }
+
+        else if (!string.IsNullOrEmpty(appEnv.DataProtectionKeysDirectory))
+        {
+            builder.Services.AddDataProtection().PersistKeysToFileSystem(new DirectoryInfo(appEnv.DataProtectionKeysDirectory));
         }
 
         builder.Services.AddControllers();
@@ -148,7 +156,7 @@ public partial class Program
         });
 
         builder.Services.AddSingleton(appEnv);
-        builder.Services.AddHealthChecks();
+        builder.Services.AddHealthChecks().AddCheck<StorageReadinessCheck>("storage", tags: ["ready"], timeout: TimeSpan.FromSeconds(5));
         builder.Services.AddScoped<IAuthService, AuthService>();
         builder.Services.AddSingleton<ICache, DatabaseCache>();
         builder.Services.AddSingleton<IAppQueries, AppQueries>();
@@ -248,7 +256,8 @@ public partial class Program
             });
         }
 
-        app.MapHealthChecks("/healthz");
+        app.MapHealthChecks("/healthz", new HealthCheckOptions { Predicate = _ => false });
+        app.MapHealthChecks("/readyz", new HealthCheckOptions { Predicate = check => check.Tags.Contains("ready") });
         app.UseMiddleware<ExceptionMiddleware>();
         app.UseRateLimiter();
         app.UseCors();
