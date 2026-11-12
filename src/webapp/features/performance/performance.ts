@@ -56,8 +56,9 @@ export const periods: readonly { value: Period; label: string }[] = [
 
 const periodHours: Record<Period, number> = { "24h": 24, "7d": 24 * 7, "30d": 24 * 30 };
 
-export type PerformanceFilters = ReleaseFilter & {
-  period: Period;
+export type PeriodFilters = ReleaseFilter & { period: Period };
+
+export type PerformanceFilters = PeriodFilters & {
   operation: { name: string; operation: string } | null;
 };
 
@@ -78,11 +79,16 @@ function appPath(appId: string) {
 }
 
 // The range is computed when the request runs so refetches cover the latest samples.
-function filterParams(buildMode: BuildMode, filters: PerformanceFilters, includeOperation: boolean) {
+export function periodParams(buildMode: BuildMode, filters: PeriodFilters) {
   const end = new Date();
   const start = new Date(end.getTime() - periodHours[filters.period] * 60 * 60 * 1000);
   const params = new URLSearchParams({ buildMode, startDate: start.toISOString(), endDate: end.toISOString() });
   appendReleaseFilter(params, filters);
+  return params;
+}
+
+function filterParams(buildMode: BuildMode, filters: PerformanceFilters, includeOperation: boolean) {
+  const params = periodParams(buildMode, filters);
   if (includeOperation && filters.operation) {
     params.set("name", filters.operation.name);
     params.set("operation", filters.operation.operation);

@@ -260,6 +260,36 @@ const sampleSpans = [
   { spanId: "3333333333333333", parentSpanId: null, name: "render.main-window", operation: "ui.render", startOffsetMs: 80, durationMs: 310, status: "ok" },
 ];
 
+type SessionCounts = {
+  observed: number;
+  withStart: number;
+  eligible: number;
+  crashed: number;
+  eligibleCrashed: number;
+  abnormal: number;
+  active: number;
+  errored: number;
+};
+
+// Sample session health per release and environment pair, release builds only.
+const sampleSessionGroups: (SessionCounts & { release: string; environment: string })[] = [
+  { release: "2.4.0", environment: "production", observed: 120, withStart: 118, eligible: 100, crashed: 3, eligibleCrashed: 2, abnormal: 4, active: 14, errored: 9 },
+  { release: "2.3.1", environment: "production", observed: 40, withStart: 40, eligible: 38, crashed: 1, eligibleCrashed: 1, abnormal: 0, active: 2, errored: 3 },
+  { release: "2.4.0", environment: "beta", observed: 3, withStart: 2, eligible: 0, crashed: 0, eligibleCrashed: 0, abnormal: 0, active: 2, errored: 0 },
+];
+
+// Discard counters with the release context of their accompanying event; "" marks a metadata-only report.
+const sampleClientReports = [
+  { release: "2.4.0", environment: "production", reason: "queue_overflow", category: "error", quantity: 12 },
+  { release: "", environment: "", reason: "before_send", category: "error", quantity: 5 },
+  { release: "", environment: "", reason: "ratelimit_backoff", category: "transaction", quantity: 2 },
+];
+
+function withDerived<T extends SessionCounts>(counts: T) {
+  const crashFreeRate = counts.eligible === 0 ? null : ((counts.eligible - counts.eligibleCrashed) * 100) / counts.eligible;
+  return { ...counts, incomplete: counts.observed - counts.eligible, crashFreeRate };
+}
+
 export class FixtureApi {
   readonly requests: ApiRequest[] = [];
   readonly unexpected: string[] = [];
@@ -351,6 +381,7 @@ export class FixtureApi {
     if (url.pathname === `${appBase}/native-symbols` || url.pathname.startsWith(`${appBase}/native-symbols/`)) {
       return this.symbols(request, url.pathname.slice(`${appBase}/native-symbols`.length));
     }
+    if (method === "GET" && url.pathname === `${appBase}/monitoring/health`) return this.sessionHealth(url);
     if (url.pathname.startsWith(`${appBase}/monitoring/`) || url.pathname === `${appBase}/sentry-projects`) {
       return this.monitoring(method, url.pathname.slice(appBase.length), request.body);
     }
@@ -386,8 +417,17 @@ export class FixtureApi {
     }
     if (path === "/monitoring/data" && method === "GET") {
       const counts = this.cleared
-        ? { issues: 0, events: 0, transactions: 0, queued: 0, alerts: 0, symbols: 0 }
-        : { issues: 3, events: 1330, transactions: 3, queued: 0, alerts: this.alerts.length, symbols: this.symbolCount() };
+        ? { issues: 0, events: 0, transactions: 0, sessions: 0, clientReports: 0, queued: 0, alerts: 0, symbols: 0 }
+        : {
+            issues: 3,
+            events: 1330,
+            transactions: 3,
+            sessions: 163,
+            clientReports: 3,
+            queued: 0,
+            alerts: this.alerts.length,
+            symbols: this.symbolCount(),
+          };
       return { status: 200, body: { counts, excludesDeliveredRawLogs: true } };
     }
     if (path === "/monitoring/data" && method === "DELETE") {
@@ -497,6 +537,33 @@ export class FixtureApi {
     const release = url.searchParams.get("release");
     const groups = release && release !== "2.4.0" ? [] : sampleGroups;
     return { status: 200, body: { groups } };
+  }
+
+  // Readable by owners and shared readers alike; filters behave like the backend summary query.
+  private sessionHealth(url: URL): Reply {
+    const release = url.searchParams.get("release");
+    const environment = url.searchParams.get("environment");
+    const matches = (row: { release: string; environment: string }) =>
+      (!release || row.release === release) && (!environment || row.environment === environment);
+    const live = this.scope(url) === "release" && !this.cleared;
+    const groups = live ? sampleSessionGroups.filter(matches) : [];
+    const keys = ["observed", "withStart", "eligible", "crashed", "eligibleCrashed", "abnormal", "active", "errored"] as const;
+    const totals = Object.fromEntries(keys.map((key) => [key, groups.reduce((sum, g) => sum + g[key], 0)])) as SessionCounts;
+    const reports = live ? sampleClientReports.filter(matches) : [];
+    return {
+      status: 200,
+      body: {
+        sessions: withDerived(totals),
+        groups: groups.map(withDerived),
+        groupsTruncated: false,
+        clientReports: {
+          reports: reports.length,
+          discardedEvents: reports.reduce((sum, r) => sum + r.quantity, 0),
+          groups: reports.map(({ reason, category, quantity }) => ({ reason, category, quantity })),
+        },
+        retentionDays: this.monitoringSettings.monitoringRetentionDays,
+      },
+    };
   }
 
   private transactionList(url: URL): Reply {

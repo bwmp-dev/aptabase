@@ -11,7 +11,16 @@ export interface MonitoringSettings {
 }
 
 export interface MonitoringDataPreview {
-  counts: { issues: number; events: number; transactions: number; queued: number; alerts: number; symbols: number };
+  counts: {
+    issues: number;
+    events: number;
+    transactions: number;
+    sessions: number;
+    clientReports: number;
+    queued: number;
+    alerts: number;
+    symbols: number;
+  };
   excludesDeliveredRawLogs: boolean;
 }
 

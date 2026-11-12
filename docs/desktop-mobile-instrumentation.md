@@ -1,6 +1,6 @@
 # Instrument desktop/mobile applications
 
-This collector offers native JSON error/app-performance endpoints and a tested, bounded Sentry envelope subset described in `sentry-compatibility.md`. It is not a universal drop-in Sentry backend. The optional native-symbol path is limited to ARM64 ELF function names/offsets for structured text frames; see `native-symbols-api.md`. No source maps, attachments, crash dumps, session replay or distributed tracing support is implied.
+This collector offers native JSON error/app-performance endpoints and a tested, bounded Sentry envelope subset described in `sentry-compatibility.md`. It is not a universal drop-in Sentry backend. The optional native-symbol path is limited to ARM64 ELF function names/offsets and optional bounded basename/line/inlining for structured text frames; see `native-symbols-api.md`. No source maps, attachments, crash dumps, session replay or distributed tracing support is implied.
 
 ## Collector setup for this fork
 
@@ -8,7 +8,7 @@ Use the repository's existing self-hosted deployment architecture: PostgreSQL pl
 
 The normal application migration runner applies PostgreSQL migrations 0015-0022 for monitoring. Back up an existing database before applying migrations in an actual deployment; no production deployment was performed here. Build the webapp using `npm ci` and `npm run build` in `src`, then build/run using the repository's .NET10 tooling and existing packaging instructions. The full local integration suite exercised the actual application startup/migrations with PostgreSQL16 and ClickHouse26.8.36.3; this is not production or physical-device acceptance.
 
-After signing in as an app owner, use Settings > Monitoring to choose capture, raw forwarding, detail retention and optional local alerts. For Sentry SDKs, provision the release/debug DSNs there and follow `sentry-compatibility.md`, including disabling session/client-report/attachment/profile features. Use the native App-Key endpoint contract for other clients. Existing usage analytics remain independent of these switches. Alerts are an on-server inbox only: no external email/webhook delivery is implemented.
+After signing in as an app owner, use Settings > Monitoring to choose capture, raw forwarding, detail retention and optional local alerts. For Sentry SDKs, provision the release/debug DSNs there and follow `sentry-compatibility.md`, including supported individual session/client-report metadata and disabling unsupported attachment/profile features. Use the native App-Key endpoint contract for other clients. Existing usage analytics remain independent of these switches. Alerts are an on-server inbox only: no external email/webhook delivery is implemented.
 
 ## Start safely
 
@@ -55,4 +55,4 @@ Native HTTP, PostgreSQL storage, validation, authorization, retry behavior and s
 
 ## One-login Windows migration
 
-See `windows-monitoring-migration.md` for the shared Aptabase login/ownership audit, exact Sentry.NET6.8.0 method/basename/line353/column17 acceptance, Sentry.Maui6.8.0 Windows compile-only check, Rust panic probe and staged MultiShock migration gates. No current application or GlitchTip instance was modified. Portable-PDB managed client diagnostics do not require Android ELF uploads. Actual MAUI/WinUI and Tauri integration remains unverified.
+See `windows-monitoring-migration.md` for the shared Aptabase login/ownership audit, exact Sentry.NET6.8.0 method/basename/line353/column17 acceptance, Sentry.Maui6.8.0 Windows compile check and user-operated reduced handled-runtime evidence, Rust panic probe and staged MultiShock migration gates. No current application or GlitchTip instance was modified. Portable-PDB managed client diagnostics do not require Android ELF uploads. Actual MultiShock/Tauri integration and automatic MAUI/WinUI unhandled/shutdown/offline acceptance remain unverified. Session-health semantics, coverage and client-report limits are in `session-health-api.md`; current replacement gates are in `glitchtip-retirement-readiness.md`.

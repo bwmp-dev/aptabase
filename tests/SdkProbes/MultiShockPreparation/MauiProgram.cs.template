@@ -8,7 +8,7 @@ public static class MauiProgram
         var builder = MauiApp.CreateBuilder().UseMauiApp<App>();
         builder.UseSentry(options => {
             options.Dsn = ProbeIsolation.Dsn;
-            options.Release = "multishock-isolated@1.0.0";
+            options.Release = RuntimeProbe.Release;
             options.Environment = "synthetic";
             options.SendDefaultPii = false;
             options.AutoSessionTracking = false;
@@ -20,6 +20,7 @@ public static class MauiProgram
             options.ShutdownTimeout = TimeSpan.FromSeconds(3);
             options.CreateHttpMessageHandler = () => new ProbeIsolation.LoopbackOnly();
             options.SetBeforeSend(e => {
+                RuntimeProbe.RecordCapture(e);
                 e.User = new SentryUser();
                 e.Contexts.Clear();
                 e.ServerName = null;

@@ -34,11 +34,9 @@ public class SentryEnvelopeTests
 
     [Theory]
     [InlineData("attachment")]
-    [InlineData("session")]
     [InlineData("sessions")]
     [InlineData("profile")]
     [InlineData("profile_chunk")]
-    [InlineData("client_report")]
     [InlineData("replay_recording")]
     [InlineData("check_in")]
     public void Rejects_Unsupported_Item_Types(string type) => Assert.Throws<UnsupportedSentryItemException>(() => SentryEnvelopeParser.Parse(Envelope(new {}, type)));

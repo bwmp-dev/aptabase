@@ -66,7 +66,7 @@ public class AppAccessTests
             $"/api/_stats/metrics?buildMode=release&appId={app.Id}&startDate=2026-01-01&endDate=2026-02-01",
             $"/api/v0/apps/{app.Id}/errors", $"/api/v0/apps/{app.Id}/issues",
             $"/api/v0/apps/{app.Id}/transactions", $"/api/v0/apps/{app.Id}/performance/summary",
-            $"/api/v0/apps/{app.Id}/releases"
+            $"/api/v0/apps/{app.Id}/releases", $"/api/v0/apps/{app.Id}/monitoring/health"
         };
         var ownerRoutes = new[] {
             $"/api/v0/apps/{app.Id}/monitoring/settings", $"/api/v0/apps/{app.Id}/monitoring/data",

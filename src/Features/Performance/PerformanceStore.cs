@@ -45,6 +45,17 @@ public class PerformanceStore(IDbContext db, IPiiSanitizer sanitizer)
 
     public async Task<bool> Record(string appId, TransactionBody body, CancellationToken cancellationToken)
     {
+        await using var connection = db.Connection;
+        await connection.OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var accepted = await Record(appId, body, connection, transaction, cancellationToken);
+        if (accepted) await transaction.CommitAsync(cancellationToken);
+        return accepted;
+    }
+
+    internal async Task<bool> Record(string appId, TransactionBody body, System.Data.Common.DbConnection connection,
+        System.Data.Common.DbTransaction transaction, CancellationToken cancellationToken)
+    {
         // All retained strings pass through the same sanitizer; arbitrary request/user context is never stored.
         var spans = body.Spans!.Select(s => new TransactionSpan {
             SpanId = s.SpanId, ParentSpanId = s.ParentSpanId, Name = sanitizer.SanitizeLabel(s.Name, 200),
@@ -52,9 +63,6 @@ public class PerformanceStore(IDbContext db, IPiiSanitizer sanitizer)
         });
         var timestamp = body.Timestamp!.Value.ToUniversalTime();
         if (timestamp > DateTime.UtcNow) timestamp = DateTime.UtcNow;
-        await using var connection = db.Connection;
-        await connection.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         var active = await connection.ExecuteScalarAsync<bool>(new CommandDefinition("""
             SELECT true FROM apps a JOIN users u ON u.id=a.owner_id
             WHERE a.id=@appId AND a.deleted_at IS NULL AND u.lock_reason IS NULL AND a.capture_performance FOR SHARE OF a
@@ -72,7 +80,6 @@ public class PerformanceStore(IDbContext db, IPiiSanitizer sanitizer)
                 name = sanitizer.SanitizeLabel(body.Name, 200), operation = sanitizer.SanitizeLabel(body.Operation, 50), body.DurationMs, body.Status,
                 release = sanitizer.SanitizeLabel(body.Release, 100), environment = sanitizer.SanitizeLabel(body.Environment, 50), platform = sanitizer.SanitizeLabel(body.Platform, 30),
                 spans = JsonSerializer.Serialize(spans, JsonOptions) }, transaction, cancellationToken: cancellationToken));
-        await transaction.CommitAsync(cancellationToken);
         return accepted;
     }
 

@@ -5,6 +5,9 @@ namespace Aptabase.Features.ErrorReporting;
 public class ErrorIngestionService(IIssueStore issues, IPiiSanitizer sanitizer, EnvSettings env)
 {
     public async Task<IssueRecordResult> Ingest(string appId, ErrorBody body, CancellationToken cancellationToken)
+        => await issues.Record(Prepare(appId, body), cancellationToken, env.ErrorQuotaEnabled);
+
+    internal TrackingError Prepare(string appId, ErrorBody body)
     {
         // Normalize timestamp (convert to UTC, clamp to now if in future)
         body.NormalizeTimestamp();
@@ -42,6 +45,6 @@ public class ErrorIngestionService(IIssueStore issues, IPiiSanitizer sanitizer, 
             IsDebug = body.IsDebug
         };
 
-        return await issues.Record(trackingError, cancellationToken, env.ErrorQuotaEnabled);
+        return trackingError;
     }
 }

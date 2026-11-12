@@ -61,6 +61,14 @@ public class IssueStore(IDbContext db) : IIssueStore
         await using var connection = db.Connection;
         await connection.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var result = await Record(error, connection, transaction, cancellationToken, enforceQuota);
+        if (result == IssueRecordResult.Accepted) await transaction.CommitAsync(cancellationToken);
+        return result;
+    }
+
+    internal async Task<IssueRecordResult> Record(TrackingError error, System.Data.Common.DbConnection connection,
+        System.Data.Common.DbTransaction transaction, CancellationToken cancellationToken, bool enforceQuota)
+    {
         // Serialize capture/settings/purge for this app; policy changes also lock the same app row.
         var policy = await connection.QuerySingleOrDefaultAsync<MonitoringSettings>(new CommandDefinition("""
             SELECT a.capture_errors, a.forward_raw_errors, a.local_alerts_enabled, a.alert_cooldown_minutes
@@ -142,7 +150,6 @@ public class IssueStore(IDbContext db) : IIssueStore
                 """, new { error.AppId, error.IsDebug, eventId = Guid.Parse(error.ErrorId), parameters.issueId,
                     alertKind, cooldown = policy.AlertCooldownMinutes }, transaction, cancellationToken: cancellationToken));
         }
-        await transaction.CommitAsync(cancellationToken);
         return IssueRecordResult.Accepted;
     }
 
@@ -150,6 +157,14 @@ public class IssueStore(IDbContext db) : IIssueStore
     {
         await using var connection = db.Connection;
         return await connection.ExecuteAsync(new CommandDefinition("""
+            DELETE FROM monitoring_sessions WHERE (app_id,is_debug,session_key) IN (
+                SELECT s.app_id,s.is_debug,s.session_key FROM monitoring_sessions s JOIN apps a ON a.id=s.app_id
+                WHERE s.received_at<CURRENT_TIMESTAMP-a.monitoring_retention_days*INTERVAL '1 day' OR a.deleted_at IS NOT NULL
+                ORDER BY s.received_at LIMIT 10000 FOR UPDATE OF s SKIP LOCKED);
+            DELETE FROM monitoring_client_reports WHERE (app_id,is_debug,report_key) IN (
+                SELECT r.app_id,r.is_debug,r.report_key FROM monitoring_client_reports r JOIN apps a ON a.id=r.app_id
+                WHERE r.received_at<CURRENT_TIMESTAMP-a.monitoring_retention_days*INTERVAL '1 day' OR a.deleted_at IS NOT NULL
+                ORDER BY r.received_at LIMIT 10000 FOR UPDATE OF r SKIP LOCKED);
             DELETE FROM error_receipts WHERE (app_id, is_debug, event_id) IN (
                 SELECT r.app_id, r.is_debug, r.event_id FROM error_receipts r JOIN apps a ON a.id=r.app_id
                 WHERE r.received_at < CURRENT_TIMESTAMP - a.monitoring_retention_days * INTERVAL '1 day' OR a.deleted_at IS NOT NULL

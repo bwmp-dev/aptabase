@@ -1,0 +1,82 @@
+﻿using System.IO.Compression;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Json;
+using Sentry;
+namespace MultiShock;
+internal static class RuntimeProbe
+{
+    internal static string Release => "maui-runtime-" + (Environment.GetEnvironmentVariable("APTABASE_PROBE_RUN") ?? "missing");
+    private static string Mode => Environment.GetEnvironmentVariable("APTABASE_PROBE_MODE") ?? "handled";
+    private static Timer? watchdog;
+    private static int started;
+    private static readonly object gate = new();
+    internal static void Initialize()
+    {
+        if (watchdog is not null) return;
+        SetErrorMode(0x0001 | 0x0002 | 0x8000);
+        Environment.SetEnvironmentVariable("DOTNET_DbgEnableMiniDump", "0");
+        Environment.SetEnvironmentVariable("COMPlus_DbgEnableMiniDump", "0");
+        Directory.CreateDirectory(ProbeIsolation.Scratch);
+        watchdog = new Timer(_ => Environment.Exit(124), null, TimeSpan.FromSeconds(25), Timeout.InfiniteTimeSpan);
+        Log("initialized " + Mode + " " + RuntimeInformation.FrameworkDescription);
+    }
+    internal static void Log(string value)
+    {
+        lock (gate) File.AppendAllText(Path.Combine(ProbeIsolation.Scratch, "runtime.log"), value + "\n");
+    }
+    internal static void RecordCapture(SentryEvent e)
+    {
+        Log("capture " + string.Join(",", (e.SentryExceptions ?? []).Select(x => x.Mechanism?.Type + ":" + x.Mechanism?.Handled)));
+    }
+    internal static async Task<HttpResponseMessage> Send(HttpRequestMessage request, CancellationToken ct, Func<Task<HttpResponseMessage>> send)
+    {
+        var bytes = await request.Content!.ReadAsByteArrayAsync(ct);
+        if (bytes.Length > 262144) throw new InvalidOperationException("Probe envelope exceeded bound");
+        using var input = new MemoryStream(bytes);
+        using var gzip = request.Content.Headers.ContentEncoding.Contains("gzip") ? new GZipStream(input, CompressionMode.Decompress) : null;
+        using var reader = new StreamReader((Stream?)gzip ?? input, Encoding.UTF8);
+        await reader.ReadLineAsync(ct);
+        var item = await reader.ReadLineAsync(ct);
+        using var header = JsonDocument.Parse(item ?? "{}");
+        var type = header.RootElement.GetProperty("type").GetString();
+        Log("item " + type);
+        if (type != "event") throw new InvalidOperationException("Unexpected SDK envelope item");
+        if (Mode == "offline") { Log("simulated offline before socket"); throw new HttpRequestException("Synthetic offline transport"); }
+        var response = await send();
+        Log("http " + (int)response.StatusCode);
+        return response;
+    }
+    internal static void Start(Window window)
+    {
+        if (Interlocked.Exchange(ref started, 1) != 0) return;
+        Log("window-created sdk-enabled=" + SentrySdk.IsEnabled);
+        Microsoft.UI.Xaml.Application.Current.UnhandledException += (_, _) => Log("WinUI unhandled observer");
+        var timer = window.Dispatcher.CreateTimer();
+        timer.Interval = TimeSpan.FromMilliseconds(300);
+        timer.IsRepeating = false;
+        timer.Tick += async (_, _) => {
+            Log("dispatch " + Mode);
+            if (Mode == "ui-unhandled") { ThrowSynthetic(); return; }
+            if (Mode == "background-unhandled") { new Thread(ThrowSynthetic).Start(); return; }
+            if (Mode != "replay") {
+                try { ThrowSynthetic(); } catch (InvalidOperationException e) { SentrySdk.CaptureException(e); }
+            }
+            if (Mode == "shutdown") SentrySdk.Close();
+            else await SentrySdk.FlushAsync(TimeSpan.FromSeconds(4));
+            Log("shutdown requested");
+            Application.Current!.Quit();
+        };
+        timer.Start();
+    }
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowSynthetic()
+    {
+#line 353 "SyntheticMauiProbe.cs"
+                throw new InvalidOperationException("Synthetic isolated MAUI failure");
+#line default
+    }
+    [DllImport("kernel32.dll")]
+    private static extern uint SetErrorMode(uint mode);
+}

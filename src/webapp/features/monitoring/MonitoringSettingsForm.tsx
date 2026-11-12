@@ -93,7 +93,8 @@ export function MonitoringSettingsForm({ appId, settings }: Props) {
       <fieldset className="space-y-3">
         <legend className="text-sm font-semibold mb-2">Capture</legend>
         <Checkbox checked={flags.captureErrors} onChange={setFlag("captureErrors")} label="Capture errors">
-          Accept new error reports for issues. When off, new reports and retries are rejected.
+          Accept new error reports for issues, and session updates for Session health. When off, new reports, session
+          updates and retries are rejected.
         </Checkbox>
         <Checkbox checked={flags.capturePerformance} onChange={setFlag("capturePerformance")} label="Capture performance">
           Accept new transactions and spans.
@@ -102,7 +103,10 @@ export function MonitoringSettingsForm({ appId, settings }: Props) {
           Copy new error reports to the raw Error logs. Turning this off is not retroactive: raw logs already delivered
           are kept for 180 days.
         </Checkbox>
-        <p className="text-xs text-muted-foreground">These apply to release and debug builds alike. Usage analytics are not affected.</p>
+        <p className="text-xs text-muted-foreground">
+          SDK discard reports are accepted while error or performance capture is on. These apply to release and debug
+          builds alike. Usage analytics are not affected.
+        </p>
       </fieldset>
 
       <NumberInput
@@ -113,8 +117,8 @@ export function MonitoringSettingsForm({ appId, settings }: Props) {
         max={RETENTION_DAYS.max}
         error={showErrors ? errors.monitoringRetentionDays : null}
       >
-        How long error occurrence details and transactions are kept after they arrive, from {RETENTION_DAYS.min} to{" "}
-        {RETENTION_DAYS.max} days. Issue summaries stay until you clear them. A shorter window also shortens how long
+        How long error occurrence details, transactions, sessions and SDK discard reports are kept after they arrive,
+        from {RETENTION_DAYS.min} to {RETENTION_DAYS.max} days. Issue summaries stay until you clear them. A shorter window also shortens how long
         retried reports are recognized as duplicates.
       </NumberInput>
 

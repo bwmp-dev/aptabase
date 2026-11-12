@@ -7,9 +7,10 @@ type Props = {
   error: unknown;
   refetch: (options?: RefetchOptions) => Promise<QueryObserverResult<unknown, Error>>;
   onResetFilters: () => void;
+  subject?: string;
 };
 
-export function QueryFailure({ error, refetch, onResetFilters }: Props) {
+export function QueryFailure({ error, refetch, onResetFilters, subject = "performance data" }: Props) {
   const status = httpStatus(error);
 
   if (status === 400) {
@@ -26,7 +27,7 @@ export function QueryFailure({ error, refetch, onResetFilters }: Props) {
   if (status === 403) {
     return (
       <p role="alert" className="py-8 text-center text-muted-foreground">
-        You don't have access to this app's performance data.
+        You don't have access to this app's {subject}.
       </p>
     );
   }

@@ -256,3 +256,31 @@ Cleanup verified: task-owned MonitoringHost, PostgreSQL, ClickHouse and mail cat
 Actual MultiShock execution was subsequently authorized, but read-only preflight stopped before launch: normal startup reads/writes the personal profile, initializes device/plugin/channel/flow services and updates, and creates a window; StartMinimized has no runtime consumer. A safe WinUI session/storage boundary is not verified. See the preflight in `windows-monitoring-migration.md` for exact source references, minimum isolated-copy changes and pending runtime gates. Original app/repository/configuration and live GlitchTip remain untouched; no runtime acceptance was added.
 
 Independent no-launch preparation is complete: reduced source-derived MAUI/WinUI6.8.0 harness published from cached dependencies and passed static isolation/hash/PDB checks. It excludes MultiShock startup/service graph and is not the original published application. Actual launch remains blocked by an unverified safe Windows session/framework-storage boundary; only active console and services session were found. See `windows-monitoring-migration.md` for departures, commands and remaining launch action.
+
+User-operated reduced MAUI handled runtime acceptance now passes: real window/Sentry enabled on.NET10.0.12, SDK6.8.0 event HTTP200, stored method/basename/353:17 and handled classification verified from saved local evidence. Services/processes are stopped. This supersedes the no-runtime-evidence statement only for handled delivery; unhandled hooks, offline/restart durability, framework profile effects and full MultiShock remain open. See windows-monitoring-migration.md.
+
+## MultiShock retirement readiness checkpoint
+
+Current scope, exact runtime evidence, remaining acceptance gates and historical-data preservation/rollback plan: [glitchtip-retirement-readiness.md](glitchtip-retirement-readiness.md). This is the controlling replacement checklist, not a generic parity commitment.
+
+- [x] Both user-operated handled MAUI6.8.0 runs verified; latest synthetic event retains method/basename/353:17 and release/environment. Published reduced harness unchanged; no automatic launch retried.
+- [x] Real Sentry6.8 disk-cache replay, acknowledgment-loss ID preservation and shutdown-drain tests: **3/3 passed** without network/UI. Added locked-dependency CI step. This is SDK reinitialization in one process, not actual app restart acceptance.
+- [x] Privacy-preserving bounded Sentry rejection/backend-failure counters, unit and real ingestion assertions; no credential/event-body logging introduced.
+- [x] PKCS10.0.13 application dependency patch removes earlier NU1902/NU1903 warnings. Final **320/320 unit**, **77/77 full sequential integration** checks passed,0failed/0skipped. No global runtime upgrade; production runtime/image patching remains a deployment prerequisite.
+- [ ] User-operated automatic WinUI/background unhandled, shutdown and offline/replay modes in the reduced harness; then actual published candidate with matching Portable PDBs, consent semantics and emitted-item inventory.
+- [ ] Authorized production-boundary and restore rehearsal, owner-approved historical preservation, staged cutover and rollback acceptance. No live service/configuration changes or history import performed.
+
+Frontend code was unchanged in this increment; previous frontend acceptance is retained, not reported as rerun. Local alerts have no external sender. Task-owned test services were stopped/removed after the full integration run; no MAUI process was launched by the agent.
+
+## Session health and retirement readiness increment (2026-11-12)
+
+The owner approved meaningful session/client-report support, superseding the earlier unsupported/discard proposal. Bounded mixed envelopes now atomically persist errors or transactions with individual sessions and client-report counters. Session IDs are privately HMAC-scoped per app/build, never exposed; user/device/IP/UA context is not retained. Terminal crash evidence is monotonic; missing starts and incomplete/abnormal sessions do not inflate the completed-session denominator. Reports retain known bounded reason/category counters and use event-aware canonical retry deduplication, with explicit metadata-only collision limitations. See `session-health-api.md`.
+
+- [x] Final backend335unit and79full sequential integration checks passed after all review fixes,0failed/0skipped. Real core SDK6.8 reliability/serialization9-test acceptance is separate from actual MAUI runtime.
+- [x] Synthetic PostgreSQL dump/restore compared all22 public tables and post-restore behavior, including private session salt and report deduplication. No live data or external delivery.
+- [x] Default SDK wire-format inventory: MAUI6.8 session tracking defaults on, core client reports default on; real non-UI SDK serialization covered. This does not prove runtime WinUI hooks.
+- [x] Opus session-health UI:114unit, typecheck/build,46mocked and40real-backend headless tests passed,0failed/skipped, one worker, isolated ports55449/55450. Parent reviewed desktop/mobile screenshots. A linked release filter was fixed to reset on Session health build-mode changes; the analogous existing Performance behavior remains outside this increment.
+- [ ] User-operated reduced MAUI unhandled/shutdown/offline/replay modes; exact `ui-unhandled` delta is in `glitchtip-retirement-readiness.md`. Automatic launch remains denied.
+- [ ] Actual published MultiShock candidate, production hosting/cutover and live GlitchTip history restore remain separate gates. No blanket replacement claim.
+
+Final review/cleanup:335backend units,79full integration,9SDK reliability/serialization,114frontend units,46mocked and40real headless checks passed; typecheck/build clean. Backend failures corrected earlier and the frontend linked-filter regression are resolved, not outstanding failures. Real UI used synthetic envelopes; SDK serialization and user-operated handled-runtime results remain separate evidence. Task-owned alternate-port services stopped/removed, manual ports untouched, no app launch/external alerts/push/deployment. See `glitchtip-retirement-readiness.md` for exact runtime/history/production blockers.

@@ -59,6 +59,7 @@ public class IssueIngestionTests
             builder.Services.AddSingleton<IDbContext>(db);
             builder.Services.AddSingleton<IIssueStore>(store);
             builder.Services.AddSingleton<PerformanceStore>();
+            builder.Services.AddSingleton<SentryMonitoringStore>();
             builder.Services.AddSingleton<IPiiSanitizer, PiiSanitizer>();
             builder.Services.AddSingleton<ErrorIngestionService>();
             builder.Services.AddSingleton<IAppQueries, AppQueries>();
@@ -208,6 +209,13 @@ public class IssueIngestionTests
             Assert.True(sink.Received.Count > pending); // Lost acknowledgements permit raw sink replay; reads deduplicate IDs.
             await CheckControls(http, connection, db, store, performance);
             await CheckSentry(http, connection, app.GetTestServer());
+            var rejections = app.Services.GetRequiredService<IRejectionStats>().Snapshot();
+            Assert.Contains(rejections.Entries, entry => entry.Key.Reason == "sentry_unsupported");
+            Assert.All(rejections.Entries.Where(entry => entry.Key.Reason.StartsWith("sentry_")), entry => {
+                Assert.Equal("", entry.Key.AppKey);
+                Assert.Equal("", entry.Key.ClientIp);
+                Assert.Equal("", entry.Key.UserAgent);
+            });
             await store.PurgeExpiredReceipts(default); await performance.Purge(default);
             Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_issues WHERE app_id='app-b'"));
             Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_outbox WHERE app_id='app-b'"));
@@ -370,7 +378,7 @@ public class IssueIngestionTests
         });
         Assert.Equal(HttpStatusCode.UnprocessableEntity, (await Send(unresolvedNative)).StatusCode);
         Assert.Equal(before, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts"));
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, (await Send(Envelope("session"))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await Send(Envelope("session"))).StatusCode); // Event body is not a valid session update.
         Assert.Equal(HttpStatusCode.Forbidden, (await Send(Envelope(), "?sentry_key=KEY-A")).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await Send("{}\n{\"type\":\"event\",\"length\":\"wrong\"}\n{}" )).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await Send(Envelope())).StatusCode);

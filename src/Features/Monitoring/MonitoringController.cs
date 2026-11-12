@@ -76,7 +76,9 @@ public class MonitoringController(IDbContext db, IIssueStore issues) : Controlle
                 (SELECT COUNT(*) FROM app_transactions WHERE app_id=@appId) AS transactions,
                 (SELECT COUNT(*) FROM error_outbox WHERE app_id=@appId) AS queued,
                 (SELECT COUNT(*) FROM monitoring_alerts WHERE app_id=@appId) AS alerts,
-                (SELECT COUNT(*) FROM native_symbols WHERE app_id=@appId) AS symbols
+                (SELECT COUNT(*) FROM native_symbols WHERE app_id=@appId) AS symbols,
+                (SELECT COUNT(*) FROM monitoring_sessions WHERE app_id=@appId) AS sessions,
+                (SELECT COUNT(*) FROM monitoring_client_reports WHERE app_id=@appId) AS "clientReports"
             """, new { appId }, cancellationToken: ct));
         return Ok(new { counts, excludesDeliveredRawLogs = true });
     }
@@ -103,6 +105,9 @@ public class MonitoringController(IDbContext db, IIssueStore issues) : Controlle
             DELETE FROM monitoring_alerts WHERE app_id=@appId;
             DELETE FROM monitoring_alert_state WHERE app_id=@appId;
             DELETE FROM native_symbols WHERE app_id=@appId;
+            DELETE FROM monitoring_sessions WHERE app_id=@appId;
+            DELETE FROM monitoring_client_reports WHERE app_id=@appId;
+            UPDATE apps SET monitoring_session_salt=NULL WHERE id=@appId;
             """, new { appId }, transaction, cancellationToken: ct));
         await transaction.CommitAsync(ct);
         return NoContent();

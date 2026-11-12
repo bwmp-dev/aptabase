@@ -7,6 +7,7 @@ M	.github/workflows/ci.yml
 A	docs/app-performance-api.md
 A	docs/desktop-mobile-instrumentation.md
 M	docs/error-api-openapi.yaml
+A	docs/glitchtip-retirement-readiness.md
 A	docs/javascript-sdk-probe.md
 A	docs/monitoring-changed-files.txt
 A	docs/monitoring-controls-api.md
@@ -14,6 +15,7 @@ A	docs/monitoring-roadmap.md
 A	docs/native-symbols-api.md
 A	docs/sdk-native-assessment.md
 A	docs/sentry-compatibility.md
+A	docs/session-health-api.md
 A	docs/windows-monitoring-migration.md
 M	etc/clickhouse/queries/get_error_count__v1.liquid
 M	etc/clickhouse/queries/get_error_types__v1.liquid
@@ -24,6 +26,7 @@ M	etc/tinybird/endpoints/get_errors__v1.pipe
 A	samples/DotNetMonitoring/DotNetMonitoring.csproj
 A	samples/DotNetMonitoring/Program.cs
 A	scripts/test-error-query-dedup.py
+M	src/Aptabase.csproj
 A	src/Data/Migrations/0015_ErrorIssues.cs
 A	src/Data/Migrations/0016_ErrorReceipts.cs
 A	src/Data/Migrations/0017_AppTransactions.cs
@@ -33,6 +36,7 @@ A	src/Data/Migrations/0020_SentryProjects.cs
 A	src/Data/Migrations/0021_MonitoringControls.cs
 A	src/Data/Migrations/0022_NativeSymbols.cs
 A	src/Data/Migrations/0023_EraseProcessedSymbolBytes.cs
+A	src/Data/Migrations/0024_SentrySessionHealth.cs
 M	src/Features/ErrorReporting/Buffer/ErrorBackgroundWritter.cs
 A	src/Features/ErrorReporting/Buffer/ErrorOutbox.cs
 D	src/Features/ErrorReporting/Buffer/IErrorBuffer.cs
@@ -56,8 +60,12 @@ A	src/Features/Performance/PurgeTransactionsJob.cs
 A	src/Features/Performance/ReleasesController.cs
 A	src/Features/Performance/TransactionBody.cs
 A	src/Features/Sentry/SentryController.cs
+A	src/Features/Sentry/SentryDeliveryMetadata.cs
 A	src/Features/Sentry/SentryEnvelope.cs
+A	src/Features/Sentry/SentryFailureDiagnostics.cs
 A	src/Features/Sentry/SentryIngestionKey.cs
+A	src/Features/Sentry/SentryMonitoringStore.cs
+A	src/Features/Sentry/SessionHealthController.cs
 A	src/Features/Symbolication/ElfSymbols.cs
 A	src/Features/Symbolication/NativeFrame.cs
 A	src/Features/Symbolication/NativeSourceOutput.cs
@@ -75,6 +83,8 @@ A	src/e2e/real/monitoring.real.spec.ts
 A	src/e2e/real/native-symbols.real.spec.ts
 A	src/e2e/real/performance.real.spec.ts
 A	src/e2e/real/real-host.ts
+A	src/e2e/real/session-health.real.spec.ts
+A	src/e2e/session-health.spec.ts
 A	src/e2e/shared-config.ts
 A	src/e2e/static-server.mjs
 M	src/package-lock.json
@@ -95,6 +105,12 @@ A	src/webapp/features/analytics/errors/NativeFrames.tsx
 A	src/webapp/features/analytics/errors/issues.ts
 M	src/webapp/features/analytics/mode/BuildModeSelector.tsx
 M	src/webapp/features/apps/SettingsPage.tsx
+A	src/webapp/features/health/ClientReports.tsx
+A	src/webapp/features/health/SessionGroups.tsx
+A	src/webapp/features/health/SessionHealthPage.test.tsx
+A	src/webapp/features/health/SessionHealthPage.tsx
+A	src/webapp/features/health/SessionSummary.tsx
+A	src/webapp/features/health/health.ts
 A	src/webapp/features/monitoring/AlertsPanel.test.tsx
 A	src/webapp/features/monitoring/AlertsPanel.tsx
 A	src/webapp/features/monitoring/ClearMonitoringData.tsx
@@ -127,8 +143,10 @@ M	tests/IntegrationTests/Clients/MailCatcher.cs
 M	tests/IntegrationTests/CustomWebApplicationFactory.cs
 A	tests/IntegrationTests/IssueIngestionTests.cs
 A	tests/IntegrationTests/IssueTrackingTests.cs
+A	tests/IntegrationTests/MonitoringRecoveryTests.cs
 A	tests/IntegrationTests/NativeSymbolTests.cs
 A	tests/IntegrationTests/NativeSymbolWorkerTests.cs
+A	tests/IntegrationTests/SentrySessionTests.cs
 A	tests/IntegrationTests/sequential.runsettings
 A	tests/MonitoringHost/MonitoringHost.csproj
 A	tests/MonitoringHost/MonitoringHostMain.cs
@@ -148,6 +166,7 @@ A	tests/SdkProbes/MultiShockPreparation/App.xaml.cs.template
 A	tests/SdkProbes/MultiShockPreparation/IsolatedProbe.csproj.template
 A	tests/SdkProbes/MultiShockPreparation/MauiProgram.cs.template
 A	tests/SdkProbes/MultiShockPreparation/ProbeIsolation.cs.template
+A	tests/SdkProbes/MultiShockPreparation/SyntheticMauiProbe.cs.template
 A	tests/SdkProbes/MultiShockPreparation/packages.lock.json
 A	tests/SdkProbes/MultiShockPreparation/prepare.py
 A	tests/SdkProbes/MultiShockPreparation/verify.py
@@ -164,6 +183,10 @@ A	tests/SdkProbes/RustWindows/Cargo.lock
 A	tests/SdkProbes/RustWindows/Cargo.toml
 A	tests/SdkProbes/RustWindows/probe.rs
 A	tests/SdkProbes/RustWindows/run.ps1
+A	tests/SdkReliability/CacheReliabilityTests.cs
+A	tests/SdkReliability/EnvelopeInventoryTests.cs
+A	tests/SdkReliability/SdkReliability.csproj
+A	tests/SdkReliability/packages.lock.json
 M	tests/UnitTests/Features/ErrorReporting/ErrorsControllerQuotaTests.cs
 A	tests/UnitTests/Features/ErrorReporting/IssueTests.cs
 M	tests/UnitTests/Features/ErrorReporting/PiiSanitizerTests.cs
@@ -172,6 +195,8 @@ A	tests/UnitTests/Features/Sentry/ElfSymbolsTests.cs
 A	tests/UnitTests/Features/Sentry/NativeFrameTests.cs
 A	tests/UnitTests/Features/Sentry/NativeSourceOutputTests.cs
 A	tests/UnitTests/Features/Sentry/SentryEnvelopeTests.cs
+A	tests/UnitTests/Features/Sentry/SentryFailureDiagnosticsTests.cs
 A	tests/UnitTests/Features/Sentry/SentryIngestionKeyTests.cs
+A	tests/UnitTests/Features/Sentry/SentryMetadataTests.cs
 A	tools/NativeSymbolWorker/NativeSymbolWorker.csproj
 A	tools/NativeSymbolWorker/Program.cs

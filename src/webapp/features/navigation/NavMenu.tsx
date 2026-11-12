@@ -8,6 +8,7 @@ import {
   IconCode,
   IconGauge,
   IconGraph,
+  IconHeartbeat,
   IconLayoutGrid,
   IconSettings,
   IconTags,
@@ -61,6 +62,13 @@ export function NavMenu(props: { onNavigation?: VoidFunction }) {
             disabled={!currentApp || !!currentApp.lockReason}
             href={`/${currentApp?.id}/performance`}
             icon={IconGauge}
+            onNavigation={props.onNavigation}
+          />
+          <NavItem
+            label="Session Health"
+            disabled={!currentApp || !!currentApp.lockReason}
+            href={`/${currentApp?.id}/health`}
+            icon={IconHeartbeat}
             onNavigation={props.onNavigation}
           />
           <NavItem

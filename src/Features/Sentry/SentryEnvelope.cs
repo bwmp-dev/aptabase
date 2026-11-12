@@ -5,7 +5,8 @@ using Aptabase.Features.Performance;
 
 namespace Aptabase.Features.Sentry;
 
-public record SentryEnvelope(string? Dsn, string EventId, ErrorBody? Error, TransactionBody? Transaction);
+public record SentryEnvelope(string? Dsn, string? EventId, ErrorBody? Error, TransactionBody? Transaction,
+    IReadOnlyList<SentrySessionUpdate> Sessions, SentryClientReport? ClientReport);
 public class UnsupportedSentryItemException : Exception;
 
 public static class SentryEnvelopeParser
@@ -17,26 +18,50 @@ public static class SentryEnvelopeParser
         if (data.Length > MaxBytes) throw new FormatException("Envelope too large");
         var offset = 0;
         var header = ParseObject(ReadLine(data, ref offset));
-        var item = ParseObject(ReadLine(data, ref offset));
-        var type = Text(item, "type");
-        if (type is not ("event" or "transaction")) throw new UnsupportedSentryItemException();
-        ReadOnlyMemory<byte> payload;
-        if (item.TryGetProperty("length", out var lengthNode))
+        JsonElement body = default;
+        string? type = null;
+        var sessions = new List<SentrySessionUpdate>();
+        SentryClientReport? clientReport = null;
+        var itemCount = 0;
+        while (offset < data.Length)
         {
-            if (lengthNode.ValueKind != JsonValueKind.Number || !lengthNode.TryGetInt32(out var length) || length < 0 || length > data.Length - offset) throw new FormatException("Invalid item length");
-            payload = data.AsMemory(offset, length);
-            offset += length;
-            if (offset < data.Length && data[offset++] != (byte)'\n') throw new FormatException("Invalid item delimiter");
+            if (++itemCount > 32) throw new FormatException("Too many envelope items");
+            var item = ParseObject(ReadLine(data, ref offset));
+            var itemType = Text(item, "type");
+            if (itemType is not ("event" or "transaction" or "session" or "client_report")) throw new UnsupportedSentryItemException();
+            ReadOnlyMemory<byte> payload;
+            if (item.TryGetProperty("length", out var lengthNode))
+            {
+                if (lengthNode.ValueKind != JsonValueKind.Number || !lengthNode.TryGetInt32(out var length) || length < 0 || length > data.Length - offset) throw new FormatException("Invalid item length");
+                payload = data.AsMemory(offset, length);
+                offset += length;
+                if (offset < data.Length && data[offset++] != (byte)'\n') throw new FormatException("Invalid item delimiter");
+            }
+            else payload = ReadLine(data, ref offset);
+            if (itemType == "session")
+            {
+                if (payload.Length > 8192 || sessions.Count >= 30) throw new FormatException("Session limit exceeded");
+                sessions.Add(SentryDeliveryMetadata.Session(ParseObject(payload)));
+            }
+            else if (itemType == "client_report")
+            {
+                if (payload.Length > 16384 || clientReport is not null) throw new FormatException("Client report limit exceeded");
+                clientReport = SentryDeliveryMetadata.ClientReport(ParseObject(payload));
+            }
+            else
+            {
+                if (type is not null) throw new FormatException("Only one event or transaction per envelope is supported");
+                type = itemType;
+                body = ParseObject(payload);
+            }
         }
-        else payload = ReadLine(data, ref offset);
-        // Validate the entire envelope before any write, including unsupported secondary items.
-        if (offset < data.Length)
+        if (itemCount == 0) throw new FormatException("Empty envelope");
+        if (type is null)
         {
-            var next = ParseObject(ReadLine(data, ref offset));
-            if (Text(next, "type") is not ("event" or "transaction")) throw new UnsupportedSentryItemException();
-            throw new FormatException("Only one event or transaction per envelope is supported");
+            var metadataId = Text(header, "event_id");
+            if (metadataId is not null && !Guid.TryParse(metadataId, out _)) throw new FormatException("Invalid event ID");
+            return new(Text(header, "dsn"), null, null, null, sessions, clientReport);
         }
-        var body = ParseObject(payload);
         var id = Text(body, "event_id") ?? Text(header, "event_id");
         if (!(Guid.TryParseExact(id, "N", out var guid) || Guid.TryParseExact(id, "D", out guid)) || guid == Guid.Empty) throw new FormatException("Invalid event ID");
         var headerId = Text(header, "event_id");
@@ -48,7 +73,7 @@ public static class SentryEnvelopeParser
         var error = type == "event" ? Error(body, canonicalId) : null;
         var transaction = type == "transaction" ? Transaction(body, canonicalId) : null;
         if (error is not null && !error.IsValid() || transaction is not null && !transaction.IsValid()) throw new FormatException("Invalid mapped event");
-        return new(Text(header, "dsn"), canonicalId, error, transaction);
+        return new(Text(header, "dsn"), canonicalId, error, transaction, sessions, clientReport);
     }
 
     private static ErrorBody Error(JsonElement body, string id)

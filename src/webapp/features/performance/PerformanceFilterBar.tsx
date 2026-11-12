@@ -1,16 +1,18 @@
 import { SegmentedControl } from "@components/SegmentedControl";
 import { BuildMode } from "@features/apps";
 import { ReleaseFilters } from "@features/releases/ReleaseFilters";
-import { Period, PerformanceFilters, periods } from "./performance";
+import { ReleaseFilter } from "@features/releases/releases";
+import { Period, PeriodFilters, periods } from "./performance";
 
 type Props = {
   appId: string;
   buildMode: BuildMode;
-  filters: PerformanceFilters;
-  onChange: (changes: Partial<PerformanceFilters>) => void;
+  filters: PeriodFilters;
+  onChange: (changes: Partial<PeriodFilters>) => void;
+  observed?: ReleaseFilter[];
 };
 
-export function PerformanceFilterBar({ appId, buildMode, filters, onChange }: Props) {
+export function PerformanceFilterBar({ appId, buildMode, filters, onChange, observed }: Props) {
   return (
     <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
       <SegmentedControl
@@ -19,7 +21,7 @@ export function PerformanceFilterBar({ appId, buildMode, filters, onChange }: Pr
         value={filters.period}
         onChange={(period: Period) => onChange({ period })}
       />
-      <ReleaseFilters appId={appId} buildMode={buildMode} value={filters} onChange={onChange} />
+      <ReleaseFilters appId={appId} buildMode={buildMode} value={filters} onChange={onChange} observed={observed} />
     </div>
   );
 }

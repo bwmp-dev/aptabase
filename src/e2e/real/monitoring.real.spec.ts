@@ -141,7 +141,7 @@ test.describe("Monitoring controls against the real test host", () => {
 
       const preview = await (await context.request.get(`/api/v0/apps/${APP_ID}/monitoring/data`)).json();
       expect(preview).toEqual({
-        counts: { issues: 0, events: 0, transactions: 0, queued: 0, alerts: 0, symbols: 0 },
+        counts: { issues: 0, events: 0, transactions: 0, sessions: 0, clientReports: 0, queued: 0, alerts: 0, symbols: 0 },
         excludesDeliveredRawLogs: true,
       });
     });

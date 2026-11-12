@@ -61,7 +61,7 @@ function defaultReply(url: URL, init?: RequestInit): Reply {
     };
   }
   if (path === "/monitoring/data") {
-    return { status: 200, body: { counts: { issues: 0, events: 0, transactions: 0, queued: 0, alerts: 0, symbols: 2 }, excludesDeliveredRawLogs: true } };
+    return { status: 200, body: { counts: { issues: 0, events: 0, transactions: 0, sessions: 0, clientReports: 0, queued: 0, alerts: 0, symbols: 2 }, excludesDeliveredRawLogs: true } };
   }
   if (path === "/sentry-projects") return { status: 200, body: { projects: [] } };
   if (path === "/native-symbols" && method === "GET") return { status: 200, body: symbols[mode] };

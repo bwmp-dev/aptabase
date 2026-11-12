@@ -29,6 +29,10 @@ public static class MonitoringHostMain
     {
         var url = Environment.GetEnvironmentVariable("APTABASE_ISSUE_TEST_DATABASE_URL")
             ?? throw new InvalidOperationException("An isolated PostgreSQL test connection is required.");
+        var configuredPort = Environment.GetEnvironmentVariable("MONITORING_TEST_PORT");
+        var port = configuredPort is null ? 55440 : int.TryParse(configuredPort, out var value) && value is >= 1024 and <= 65535
+            ? value : throw new InvalidOperationException("MONITORING_TEST_PORT must be an unprivileged TCP port.");
+        var baseUrl = $"http://127.0.0.1:{port}";
         var webRoot = Path.GetFullPath(Environment.GetEnvironmentVariable("MONITORING_TEST_WEBROOT") ?? "src/wwwroot");
         if (!File.Exists(Path.Combine(webRoot, "index.html"))) throw new InvalidOperationException("Build the webapp first.");
         var database = "aptabase_browser_" + Guid.NewGuid().ToString("N");
@@ -43,16 +47,17 @@ public static class MonitoringHostMain
             var db = new DbContext(source);
             await using var connection = db.Connection;
             var env = (EnvSettings)Activator.CreateInstance(typeof(EnvSettings), nonPublic: true)!;
-            typeof(EnvSettings).GetProperty(nameof(EnvSettings.SelfBaseUrl))!.SetValue(env, "http://127.0.0.1:55440");
+            typeof(EnvSettings).GetProperty(nameof(EnvSettings.SelfBaseUrl))!.SetValue(env, baseUrl);
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { WebRootPath = webRoot });
             builder.Services.AddFluentMigratorCore().ConfigureRunner(r =>
                 r.AddPostgres().WithGlobalConnectionString(url).ScanIn(typeof(IssuesController).Assembly).For.Migrations());
-            builder.WebHost.UseUrls("http://127.0.0.1:55440");
+            builder.WebHost.UseUrls(baseUrl);
             builder.Logging.SetMinimumLevel(LogLevel.Warning);
             builder.Services.AddSingleton(env);
             builder.Services.AddSingleton<IDbContext>(db);
             builder.Services.AddSingleton<IIssueStore, IssueStore>();
             builder.Services.AddSingleton<PerformanceStore>();
+            builder.Services.AddSingleton<SentryMonitoringStore>();
             builder.Services.AddSingleton<Aptabase.Features.Symbolication.INativeSymbolProcessor,Aptabase.Features.Symbolication.NativeSymbolProcessor>();
             builder.Services.AddSingleton<Aptabase.Features.Symbolication.NativeSymbolStore>();
             builder.Services.AddHostedService<Aptabase.Features.Symbolication.NativeSymbolJob>();
@@ -121,7 +126,7 @@ public static class MonitoringHostMain
             app.MapGet("/test/avatar.svg", () => Results.Text("<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><rect width='32' height='32' fill='#888'/></svg>", "image/svg+xml"));
             app.MapFallbackToFile("index.html");
             using var lifetime = new CancellationTokenSource(TimeSpan.FromMinutes(45));
-            Console.WriteLine("Monitoring test host: http://127.0.0.1:55440 (45 minute maximum lifetime)");
+            Console.WriteLine($"Monitoring test host: {baseUrl} (45 minute maximum lifetime)");
             await app.RunAsync(lifetime.Token);
         }
         finally { await admin.ExecuteAsync($"DROP DATABASE {database} WITH (FORCE)"); }
@@ -131,7 +136,7 @@ public static class MonitoringHostMain
     {
         public void PopulateFeature(IEnumerable<ApplicationPart> parts, ControllerFeature feature)
         {
-            var allowed = new[] { typeof(ErrorsController), typeof(IssuesController), typeof(PerformanceController), typeof(ReleasesController), typeof(SentryController), typeof(MonitoringController), typeof(Aptabase.Features.Symbolication.NativeSymbolsController) };
+            var allowed = new[] { typeof(ErrorsController), typeof(IssuesController), typeof(PerformanceController), typeof(ReleasesController), typeof(SentryController), typeof(SessionHealthController), typeof(MonitoringController), typeof(Aptabase.Features.Symbolication.NativeSymbolsController) };
             foreach (var controller in feature.Controllers.ToArray())
                 if (!allowed.Contains(controller.AsType())) feature.Controllers.Remove(controller);
         }

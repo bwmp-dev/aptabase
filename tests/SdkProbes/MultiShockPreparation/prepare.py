@@ -2,7 +2,7 @@ from pathlib import Path
 import hashlib, json
 source=Path('D:/Coding/PiShock/MultiShock/MultiShock')
 root=Path(__file__).resolve().parent
-out=root/'bin'/'isolated-v4'
+out=root/'bin'/'isolated-runtime'
 if out.exists():
     raise SystemExit('Refusing to overwrite an existing preparation directory')
 files=['Core/App.xaml','Platforms/Windows/App.xaml','Platforms/Windows/App.xaml.cs','Platforms/Windows/app.manifest']
@@ -17,7 +17,7 @@ s=win.read_text(encoding='utf-8-sig').replace('using Velopack;', '').replace('Ve
 win.write_text(s,encoding='utf-8')
 manifest=out/'Platforms/Windows/app.manifest'
 manifest.write_text(manifest.read_text().replace('MultiShock.WinUI.app','Aptabase.Isolated.MultiShockProbe'),encoding='utf-8')
-for name in ['MauiProgram.cs','App.xaml.cs','ProbeIsolation.cs']:
+for name in ['MauiProgram.cs','App.xaml.cs','ProbeIsolation.cs','SyntheticMauiProbe.cs']:
     (out/'Core'/name).write_bytes((root/(name+'.template')).read_bytes())
 (out/'IsolatedProbe.csproj').write_bytes((root/'IsolatedProbe.csproj.template').read_bytes())
 (out/'packages.lock.json').write_bytes((root/'packages.lock.json').read_bytes())

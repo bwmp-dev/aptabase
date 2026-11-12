@@ -21,7 +21,7 @@ public class SentryProject
 
 [ApiController]
 [ResponseCache(NoStore = true)]
-public class SentryController(IDbContext db, IIssueStore issues, ErrorIngestionService errors, PerformanceStore performance, EnvSettings env) : ControllerBase
+public class SentryController(IDbContext db, IIssueStore issues, SentryMonitoringStore monitoring, EnvSettings env) : ControllerBase
 {
     [HttpGet("/api/v0/apps/{appId}/sentry-projects")]
     [IsAuthenticated, EnableRateLimiting("Stats")]
@@ -61,6 +61,7 @@ public class SentryController(IDbContext db, IIssueStore issues, ErrorIngestionS
     }
 
     [HttpPost("/api/{projectId:long}/envelope/")]
+    [TypeFilter(typeof(SentryFailureDiagnostics))]
     [EnableCors("SentryIngestion"), EnableRateLimiting("EventIngestion")]
     [RequestSizeLimit(131072)]
     public async Task<IActionResult> Envelope(long projectId, CancellationToken cancellationToken)
@@ -83,7 +84,7 @@ public class SentryController(IDbContext db, IIssueStore issues, ErrorIngestionS
             }
             envelope = SentryEnvelopeParser.Parse(buffer.ToArray());
         }
-        catch (UnsupportedSentryItemException) { return UnprocessableEntity(new { error = "Only one event or transaction item is supported; attachments, sessions, profiles and other item types are unsupported" }); }
+        catch (UnsupportedSentryItemException) { return UnprocessableEntity(new { error = "Supported items: event, transaction, session, client_report; attachments, aggregate sessions, profiles and other types are unsupported" }); }
         catch (Exception ex) when (ex is JsonException or FormatException or InvalidDataException)
         { return BadRequest(new { error = "Invalid or unsupported envelope structure" }); }
 
@@ -112,18 +113,15 @@ public class SentryController(IDbContext db, IIssueStore issues, ErrorIngestionS
             WHERE p.id = @projectId AND a.deleted_at IS NULL AND u.lock_reason IS NULL
             """, new { projectId }, cancellationToken: cancellationToken));
         if (project is null || !SentryIngestionKey.Matches(project, keys[0])) return StatusCode(403);
-        if (envelope.Error is not null)
+        var result = await monitoring.Ingest(project, envelope, cancellationToken);
+        if (result == SentryWriteResult.Unavailable) return StatusCode(403);
+        if (result == SentryWriteResult.ErrorQuota) return StatusCode(403, new { error = "Error quota exceeded" });
+        if (result == SentryWriteResult.Conflict) return Conflict(new { error = "Session identity fields conflict" });
+        if (result == SentryWriteResult.MetadataQuota)
         {
-            envelope.Error.IsDebug = project.IsDebug;
-            var result = await errors.Ingest(project.AppId, envelope.Error, cancellationToken);
-            if (result == IssueRecordResult.QuotaExceeded) return StatusCode(403, new { error = "Error quota exceeded" });
-            if (result == IssueRecordResult.AppUnavailable) return StatusCode(403);
+            Response.Headers.RetryAfter = "60";
+            return StatusCode(503, new { error = "Monitoring storage limit reached; no items accepted" });
         }
-        else
-        {
-            envelope.Transaction!.IsDebug = project.IsDebug;
-            if (!await performance.Record(project.AppId, envelope.Transaction, cancellationToken)) return StatusCode(403);
-        }
-        return Ok(new { id = Guid.Parse(envelope.EventId).ToString("N") });
+        return Ok(new { id = envelope.EventId is null ? null : Guid.Parse(envelope.EventId).ToString("N") });
     }
 }

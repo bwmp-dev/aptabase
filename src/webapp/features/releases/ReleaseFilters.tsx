@@ -9,6 +9,7 @@ type Props = {
   buildMode: BuildMode;
   value: ReleaseFilter;
   onChange: (changes: Partial<ReleaseFilter>) => void;
+  observed?: ReleaseFilter[];
 };
 
 function uniqueSorted(values: string[], selected: string) {
@@ -17,14 +18,15 @@ function uniqueSorted(values: string[], selected: string) {
   return [...unique].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 }
 
-// Options come from the observed release catalog; a selected value stays listed even if it has aged out.
-export function ReleaseFilters({ appId, buildMode, value, onChange }: Props) {
+// Options come from the observed release catalog plus any pairs the caller observed elsewhere; a selected value stays
+// listed even if it has aged out.
+export function ReleaseFilters({ appId, buildMode, value, onChange, observed = [] }: Props) {
   const { data } = useQuery({
     queryKey: releaseKeys.list(appId, buildMode),
     queryFn: () => fetchReleases(appId, buildMode),
     retry: retryServerErrors,
   });
-  const releases = data?.releases ?? [];
+  const releases: ReleaseFilter[] = [...(data?.releases ?? []), ...observed];
 
   return (
     <>

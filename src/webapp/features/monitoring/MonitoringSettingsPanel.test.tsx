@@ -30,7 +30,7 @@ function defaultReply(url: URL, init?: RequestInit): Reply {
     return { status: 200, body: settings };
   }
   if (path === "/monitoring/data" && method === "GET") {
-    return { status: 200, body: { counts: { issues: 4, events: 120, transactions: 900, queued: 2, alerts: 3, symbols: 5 }, excludesDeliveredRawLogs: true } };
+    return { status: 200, body: { counts: { issues: 4, events: 120, transactions: 900, sessions: 61, clientReports: 7, queued: 2, alerts: 3, symbols: 5 }, excludesDeliveredRawLogs: true } };
   }
   if (path === "/monitoring/data" && method === "DELETE") return { status: 204 };
   if (path === "/sentry-projects" && method === "GET") return { status: 200, body: { projects } };
@@ -101,6 +101,15 @@ describe("MonitoringSettingsPanel settings", () => {
     expect(screen.getByText(/raw logs already delivered are kept for 180 days/)).toBeTruthy();
   });
 
+  it("describes session capture and when SDK discard reports are accepted", async () => {
+    renderPanel();
+    await screen.findByLabelText("Capture errors");
+
+    expect(screen.getByText(/session updates for Session health/)).toBeTruthy();
+    expect(screen.getByText(/SDK discard reports are accepted while error or performance capture is on/)).toBeTruthy();
+    expect(screen.getByText(/transactions, sessions and SDK discard reports are kept/)).toBeTruthy();
+  });
+
   it.each([
     ["0", "Retention (days)"],
     ["31", "Retention (days)"],
@@ -157,7 +166,11 @@ describe("MonitoringSettingsPanel clear data", () => {
 
     expect(await within(section).findByText("900")).toBeTruthy();
     expect(within(section).getByText("Native symbol files").nextElementSibling?.textContent).toBe("5");
+    expect(within(section).getByText("Sessions").nextElementSibling?.textContent).toBe("61");
+    expect(within(section).getByText("SDK discard reports").nextElementSibling?.textContent).toBe("7");
+    expect(section.textContent).toContain("transactions, sessions, SDK discard reports");
     expect(section.textContent).toContain("local alerts and native symbol files from this server's PostgreSQL database");
+    expect(section.textContent).toContain("private key for hashing session IDs is also removed");
     expect((within(section).getByRole("textbox") as HTMLInputElement).disabled).toBe(true);
     expect((within(section).getByRole("button", { name: "Clear monitoring data" }) as HTMLButtonElement).disabled).toBe(true);
     expect(section.textContent).toContain("first turn off error capture, performance capture and raw log forwarding");
