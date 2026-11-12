@@ -29,15 +29,15 @@ The fork's LICENSE and attribution remain unchanged. Any future copied source re
 - [x] Auto-reopen a resolved issue only for a newly accepted report whose normalized event timestamp is after resolvedAt. Delayed pre-resolution reports and duplicate retries must not reopen it. Explicit owner reopen remains supported.
 - [x] Literal bounded issue search with scoped pagination and query validation.
 - [x] HTTP ingestion through real filters/controllers to PostgreSQL; owner/shared/stranger, malformed bodies, lifecycle, concurrent ingestion and rollback.
-- [ ] Nonintrusive headless desktop/mobile visual and keyboard checks; distinguish mocked-network UI checks from real HTTP/database end-to-end coverage.
+- [x] Nonintrusive headless desktop/mobile visual and keyboard checks; mocked-network and real HTTP/database suites reported separately.
 - [x] Durable PostgreSQL outbox committed with issue/receipt/quota; bounded retry batches and deduplicated raw reads for ClickHouse/Tinybird. Transport remains at-least-once; no exactly-once network claim.
 
 ### 2. Triage context, environments and releases
 - [x] Backend bounded sanitized event context/detail, latest/recent occurrences linked to issue; no request bodies, cookies, headers, user IDs or session identities by default.
 - [x] Backend explicit environment and release labels; preserve debug/release build mode as a separate dimension. Issue filters: status, literal search, environment and release. Raw logs retain their existing type/severity/time filters; performance has time/name/operation filters.
 - [x] Backend observed release/environment catalog from retained errors/transactions.
-- [ ] Release/context frontend (Opus in progress). Deeper release regression comparisons are deferred; observed labels are not deployment records.
-- [ ] Acceptance: same fingerprint across releases remains one issue; environment filter semantics documented; access checks on every detail/query; oversized/high-cardinality context rejected or bounded.
+- [x] Release/context frontend and linked filtering tested through real HTTP/PostgreSQL. Deeper release regression comparisons are deferred; observed labels are not deployment records.
+- [x] Acceptance: same fingerprint across releases remains one issue; environment filter semantics documented; access checks on every detail/query; context sizes and retained fields bounded. Release/occurrence links covered by headless tests.
 
 ### 3. Sentry SDK intake subset
 - [x] Owner-provisioned app/build DSNs with explicit project/key binding. Reuse existing ingestion keys; separate credential rotation is outside this subset.
@@ -64,10 +64,10 @@ Rate/threshold rules, external delivery queues/backoff and channel configuration
 ### 6. App performance and instrumentation (priority after reliability/context)
 - [x] Bounded sampled transaction/span ingestion for desktop/mobile operations (startup, navigation, rendering, local work and app network calls); no automatic unsampled collection.
 - [x] Self-hosted PostgreSQL storage first, with 30-day event retention and indexed app/build/time queries. Preserve existing ClickHouse/Tinybird analytics unchanged. Reassess storage against measured volume before claiming scale.
-- [ ] App-scoped latency summaries (count, errors, p50/p95) and transaction/span details, filtered by environment/release/time. Never collect request payloads, user identifiers or full URLs by default.
+- [x] App-scoped latency summaries (count, errors, p50/p95) and transaction/span details, filtered by environment/release/time. No request payloads, user identifiers or full URLs retained by default.
 - [x] Backend acceptance: duration/span/count/name bounds, retry deduplication, malformed parent relationships, tenant access and percentile fixtures tested.
 - [x] Desktop/mobile instrumentation docs and examples explaining stable operation names, sampling, monotonic durations, offline retry IDs and privacy boundaries.
-- [ ] Headless frontend-to-backend tests and narrow/desktop visual checks with local fixture data.
+- [x] Headless frontend-to-backend tests and narrow/desktop visual checks with disposable local data.
 
 ## Owner decisions and scope boundaries
 
@@ -139,12 +139,16 @@ Latest privacy checks:270 unit tests passed. Added URL/short credential redactio
 
 | Area | Current evidence | Remaining gate |
 | --- | --- | --- |
-| Native errors and issues | Atomic deduplication/quota/outbox, recurrence, scoped search/context; HTTP/PostgreSQL tests passed | Final integrated frontend run |
-| App performance | Bounded spans, retained sampled transactions, p50/p95, labels, permissions; HTTP/PostgreSQL tests passed | Opus UI and headless acceptance |
+| Native errors and issues | Atomic deduplication/quota/outbox, recurrence, scoped search/context; HTTP/PostgreSQL and real headless tests passed | Revalidate alongside final controls UI |
+| App performance | Bounded spans, sampled counts, p50/p95, labels, permissions; HTTP/PostgreSQL and real desktop/mobile headless tests passed | Configurable-retention copy and server-error retry test being finished |
 | Sentry subset | Actual .NET6.10.0 exception and transaction through serializer/compression/auth to TestServer; unsupported envelopes rejected before writes | Platform-specific SDKs and physical-device/native scenarios are explicitly unverified |
 | Privacy and retention | Capture switches, shortened retention isolation, confirmed scoped purge, soft-delete cleanup, raw suppression/expiry, PII regression suite passed | Opus controls UI; delivered raw data keeps separate180-day TTL |
 | Local alerts | Transactional new/regression inbox, duplicate/cooldown/rollback/disable/read/expiry tests passed | Opus inbox UI; external channels deliberately excluded |
-| Frontend | Delegate reported19 unit tests and12 fixture headless checks passed for issue search; final real issue run was pending | Final performance/context/releases/controls tests, typecheck/build, desktop/mobile real host checks |
+| Frontend | Delegate reported36 unit tests,18 fixture headless checks and16 real headless checks passed; typecheck/build passed | Final controls/inbox tests and integrated typecheck/build/headless rerun |
 | Repository | Local commits only on feat/error-issues; licenses unchanged | Review combined final diff and commit integrated frontend when delivered |
 
 Latest backend commands: `dotnet test tests/UnitTests --no-restore -m:1` passed270 tests; `dotnet test tests/IntegrationTests --no-restore -m:1 --filter 'FullyQualifiedName~IssueIngestionTests|FullyQualifiedName~IssueTrackingTests'` passed both focused scenarios against isolated PostgreSQL. A subsequent targeted ingestion run also passed JSON response-contract assertions for purge preview and local alerts. No unresolved failure in these checks. Existing NU1902/NU1903 warnings for System.Security.Cryptography.Pkcs10.0.0 remain. Full historical integration suite, hosted Tinybird, production deployment/load, physical devices and external alert delivery are unrun. Do not infer these from the local checks.
+
+### Performance/context frontend checkpoint
+
+Opus completed performance summaries, filtered transactions, span detail, release catalog and recent error occurrences. Reported36 unit tests across5 files,18 mocked-network production-bundle checks and16 real backend checks on desktop/Pixel7, plus typecheck/build all passing. Real tests demonstrate3 samples/1 error/p50=200ms, nested spans and focus return, release-linked occurrences, build separation and shared-reader/stranger boundaries. Parent inspected saved mobile performance/transaction and desktop release screenshots without opening a browser. One low-impact react-doctor duplicate-header warning remains. Controls/inbox/Sentry provision UI is still in progress; copy must reflect configurable1?30-day retention and separate raw180-day TTL.
