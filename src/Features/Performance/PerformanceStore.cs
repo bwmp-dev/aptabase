@@ -47,8 +47,8 @@ public class PerformanceStore(IDbContext db, IPiiSanitizer sanitizer)
     {
         // All retained strings pass through the same sanitizer; arbitrary request/user context is never stored.
         var spans = body.Spans!.Select(s => new TransactionSpan {
-            SpanId = s.SpanId, ParentSpanId = s.ParentSpanId, Name = sanitizer.Sanitize(s.Name),
-            Operation = sanitizer.Sanitize(s.Operation), StartOffsetMs = s.StartOffsetMs, DurationMs = s.DurationMs, Status = s.Status
+            SpanId = s.SpanId, ParentSpanId = s.ParentSpanId, Name = sanitizer.SanitizeLabel(s.Name, 200),
+            Operation = sanitizer.SanitizeLabel(s.Operation, 50), StartOffsetMs = s.StartOffsetMs, DurationMs = s.DurationMs, Status = s.Status
         });
         var timestamp = body.Timestamp!.Value.ToUniversalTime();
         if (timestamp > DateTime.UtcNow) timestamp = DateTime.UtcNow;
@@ -69,8 +69,8 @@ public class PerformanceStore(IDbContext db, IPiiSanitizer sanitizer)
                 FROM active ON CONFLICT DO NOTHING)
             SELECT EXISTS (SELECT 1 FROM active)
             """, new { appId, body.IsDebug, eventId = Guid.Parse(body.EventId!), timestamp,
-                name = sanitizer.Sanitize(body.Name), operation = sanitizer.Sanitize(body.Operation), body.DurationMs, body.Status,
-                release = sanitizer.Sanitize(body.Release), environment = sanitizer.Sanitize(body.Environment), platform = sanitizer.Sanitize(body.Platform),
+                name = sanitizer.SanitizeLabel(body.Name, 200), operation = sanitizer.SanitizeLabel(body.Operation, 50), body.DurationMs, body.Status,
+                release = sanitizer.SanitizeLabel(body.Release, 100), environment = sanitizer.SanitizeLabel(body.Environment, 50), platform = sanitizer.SanitizeLabel(body.Platform, 30),
                 spans = JsonSerializer.Serialize(spans, JsonOptions) }, transaction, cancellationToken: cancellationToken));
         await transaction.CommitAsync(cancellationToken);
         return accepted;
