@@ -13,26 +13,20 @@ namespace Aptabase.Features.ErrorReporting;
 [ResponseCache(NoStore = true)]
 public class ErrorsController : ControllerBase
 {
-    private readonly IIssueStore _issues;
-    private readonly IPiiSanitizer _piiSanitizer;
+    private readonly ErrorIngestionService _ingestion;
     private readonly IErrorQueryClient _errorQueryClient;
     private readonly IDbContext _db;
-    private readonly EnvSettings _env;
     private readonly ILogger<ErrorsController> _logger;
 
     public ErrorsController(
-        IIssueStore issues,
-        IPiiSanitizer piiSanitizer,
+        ErrorIngestionService ingestion,
         IErrorQueryClient errorQueryClient,
         IDbContext db,
-        EnvSettings env,
         ILogger<ErrorsController> logger)
     {
-        _issues = issues;
-        _piiSanitizer = piiSanitizer;
+        _ingestion = ingestion;
         _errorQueryClient = errorQueryClient;
         _db = db;
-        _env = env;
         _logger = logger;
     }
 
@@ -50,44 +44,8 @@ public class ErrorsController : ControllerBase
             return BadRequest(new { error = "Invalid error payload" });
         }
 
-        // Normalize timestamp (convert to UTC, clamp to now if in future)
-        body.NormalizeTimestamp();
-
-        // Normalize severity/kind against the known values (unknown values become empty)
-        body.NormalizeSeverityAndKind();
-
-        // Missing, unknown and locked App-Keys were already rejected by ResolveErrorAppKey, before the body was parsed
         var app = ResolveAppKeyAttribute.GetApp(HttpContext);
-
-        var errorId = body.EventId is null ? Guid.NewGuid().ToString() : Guid.Parse(body.EventId).ToString();
-
-        // Sanitize PII from error message and stack trace
-        var sanitizedErrorMessage = _piiSanitizer.Sanitize(body.ErrorMessage);
-        var sanitizedStackTrace = _piiSanitizer.Sanitize(body.StackTrace);
-
-        // Create tracking error
-        var trackingError = new TrackingError
-        {
-            ErrorId = errorId,
-            AppId = app.Id,
-            Timestamp = body.Timestamp!.Value,
-            ErrorMessage = sanitizedErrorMessage,
-            ErrorType = _piiSanitizer.Sanitize(body.ErrorType),
-            StackTrace = sanitizedStackTrace,
-            Release = _piiSanitizer.Sanitize(body.Release ?? body.AppVersion),
-            Environment = _piiSanitizer.Sanitize(body.Environment),
-            Platform = _piiSanitizer.Sanitize(body.Platform),
-            OsName = _piiSanitizer.Sanitize(body.OsName),
-            OsVersion = _piiSanitizer.Sanitize(body.OsVersion),
-            AppVersion = _piiSanitizer.Sanitize(body.AppVersion),
-            SdkVersion = _piiSanitizer.Sanitize(body.SdkVersion),
-            SessionId = body.SessionId,
-            Severity = body.Severity,
-            Kind = body.Kind,
-            IsDebug = body.IsDebug
-        };
-
-        var result = await _issues.Record(trackingError, cancellationToken, _env.ErrorQuotaEnabled);
+        var result = await _ingestion.Ingest(app.Id, body, cancellationToken);
         if (result == IssueRecordResult.Duplicate) return Accepted();
         if (result == IssueRecordResult.AppUnavailable) return BadRequest(new { error = "App is unavailable" });
         if (result == IssueRecordResult.QuotaExceeded)

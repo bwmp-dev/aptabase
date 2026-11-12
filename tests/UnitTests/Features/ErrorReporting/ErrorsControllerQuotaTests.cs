@@ -92,11 +92,9 @@ public class ErrorsControllerQuotaTests
     private ErrorsController CreateController(bool errorQuotaEnabled)
     {
         var controller = new ErrorsController(
-            _issues.Object,
-            _piiSanitizer.Object,
+            new ErrorIngestionService(_issues.Object, _piiSanitizer.Object, CreateEnvSettings(errorQuotaEnabled)),
             _errorQueryClient.Object,
             _db.Object,
-            CreateEnvSettings(errorQuotaEnabled),
             Mock.Of<ILogger<ErrorsController>>())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }

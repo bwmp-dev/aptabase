@@ -40,10 +40,10 @@ The fork's LICENSE and attribution remain unchanged. Any future copied source re
 - [ ] Acceptance: same fingerprint across releases remains one issue; environment filter semantics documented; access checks on every detail/query; oversized/high-cardinality context rejected or bounded.
 
 ### 3. Sentry SDK intake subset
-- [ ] App-scoped DSN credentials with rotation and explicit project binding; do not treat an arbitrary URL project ID as authority.
-- [ ] Strict bounded envelope parser and event/exception mapping into the same validated ingestion service; event_id reuse reaches the same deduplication path.
-- [ ] Test real SDK-generated fixtures, framing/length/compression limits, auth mismatches, duplicate events and unsupported item types.
-- [ ] Publish a tested compatibility matrix. Initial subset excludes attachments, minidumps, replay, profiles, source-map uploads/symbolication and Sentry management APIs. Do not advertise universal Sentry compatibility.
+- [x] Owner-provisioned app/build DSNs with explicit project/key binding. Reuse existing ingestion keys; separate credential rotation is outside this subset.
+- [x] Strict bounded envelope parser and event/exception mapping into the same validated ingestion service; event_id reuse reaches the same deduplication path.
+- [x] Test real SDK-generated fixtures, framing/length/compression limits, auth mismatches, duplicate events and unsupported item types.
+- [x] Publish a tested compatibility matrix (`sentry-compatibility.md`). Initial subset excludes attachments, minidumps, replay, profiles, source-map uploads/symbolication and Sentry management APIs. Do not advertise universal Sentry compatibility.
 
 ### 4. Privacy and retention
 - [ ] Automatic bounded receipt expiry; scoped issue/event deletion and app deletion cleanup.
@@ -120,3 +120,7 @@ A build initially found a migration/service class name collision; the migration 
 ### Instrumentation example
 
 Added native desktop/mobile instrumentation guidance and a dependency-free .NET sample. `dotnet run --project samples/DotNetMonitoring --verbosity quiet` built and ran successfully in offline mode, printing sample JSON only. No alert, webhook, email or external telemetry was sent. Device-specific SDK and physical-device validation remain open.
+
+### Sentry adapter checkpoint
+
+264 unit tests passed; both focused PostgreSQL/HTTP scenarios passed after correcting a test-helper connection type. The ingestion scenario then passed with actual Sentry .NET 6.10.0 exception and transaction/span delivery through TestServer. No external telemetry sent. Separate owner-provisioned release/debug projects map to existing app keys. See `sentry-compatibility.md` for exact subset and platform gaps.

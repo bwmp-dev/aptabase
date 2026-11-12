@@ -8,6 +8,7 @@ using Aptabase.Features.ErrorReporting.Buffer;
 using Aptabase.Features.Ingestion;
 using Aptabase.Features.Performance;
 using Aptabase.Features.Stats;
+using Aptabase.Features.Sentry;
 using Dapper;
 using FluentMigrator.Runner;
 using Microsoft.AspNetCore.Authentication;
@@ -41,6 +42,7 @@ public static class MonitoringHostMain
             var db = new DbContext(source);
             await using var connection = db.Connection;
             var env = (EnvSettings)Activator.CreateInstance(typeof(EnvSettings), nonPublic: true)!;
+            typeof(EnvSettings).GetProperty(nameof(EnvSettings.SelfBaseUrl))!.SetValue(env, "http://127.0.0.1:55440");
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { WebRootPath = webRoot });
             builder.Services.AddFluentMigratorCore().ConfigureRunner(r =>
                 r.AddPostgres().WithGlobalConnectionString(url).ScanIn(typeof(IssuesController).Assembly).For.Migrations());
@@ -51,6 +53,7 @@ public static class MonitoringHostMain
             builder.Services.AddSingleton<IIssueStore, IssueStore>();
             builder.Services.AddSingleton<PerformanceStore>();
             builder.Services.AddSingleton<IPiiSanitizer, PiiSanitizer>();
+            builder.Services.AddSingleton<ErrorIngestionService>();
             builder.Services.AddSingleton<IAppQueries, AppQueries>();
             builder.Services.AddSingleton<IIngestionCache, IngestionCache>();
             builder.Services.AddSingleton<IRejectionStats, RejectionStats>();
@@ -63,7 +66,10 @@ public static class MonitoringHostMain
             });
             builder.Services.AddControllers().AddApplicationPart(typeof(IssuesController).Assembly)
                 .ConfigureApplicationPartManager(m => m.FeatureProviders.Add(new MonitoringControllersOnly()));
-            builder.Services.AddCors(o => o.AddPolicy("AllowAny", p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+            builder.Services.AddCors(o => {
+                o.AddPolicy("AllowAny", p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
+                o.AddPolicy("SentryIngestion", p => p.AllowAnyOrigin().AllowAnyHeader().WithMethods("POST", "OPTIONS"));
+            });
             builder.Services.AddRateLimiter(o => {
                 o.AddFixedWindowLimiter("Stats", p => { p.PermitLimit = 1000; p.Window = TimeSpan.FromMinutes(1); });
                 o.AddFixedWindowLimiter("EventIngestion", p => { p.PermitLimit = 1000; p.Window = TimeSpan.FromMinutes(1); });
@@ -121,7 +127,7 @@ public static class MonitoringHostMain
     {
         public void PopulateFeature(IEnumerable<ApplicationPart> parts, ControllerFeature feature)
         {
-            var allowed = new[] { typeof(ErrorsController), typeof(IssuesController), typeof(PerformanceController), typeof(ReleasesController) };
+            var allowed = new[] { typeof(ErrorsController), typeof(IssuesController), typeof(PerformanceController), typeof(ReleasesController), typeof(SentryController) };
             foreach (var controller in feature.Controllers.ToArray())
                 if (!allowed.Contains(controller.AsType())) feature.Controllers.Remove(controller);
         }

@@ -1,4 +1,8 @@
 using System.Net;
+using System.Text;
+using System.Text.Json;
+using System.Security.Claims;
+using Aptabase.Features.Sentry;
 using Aptabase.Data;
 using Aptabase.Features;
 using Aptabase.Features.Apps;
@@ -46,6 +50,7 @@ public class IssueIngestionTests
                 """);
             var store = new IssueStore(db);
             var env = (EnvSettings)Activator.CreateInstance(typeof(EnvSettings), nonPublic: true)!;
+            typeof(EnvSettings).GetProperty(nameof(EnvSettings.SelfBaseUrl))!.SetValue(env, "http://localhost");
             typeof(EnvSettings).GetProperty(nameof(EnvSettings.ErrorQuotaEnabled))!.SetValue(env, true);
             var builder = WebApplication.CreateBuilder();
             builder.WebHost.UseTestServer();
@@ -54,13 +59,18 @@ public class IssueIngestionTests
             builder.Services.AddSingleton<IIssueStore>(store);
             builder.Services.AddSingleton<PerformanceStore>();
             builder.Services.AddSingleton<IPiiSanitizer, PiiSanitizer>();
+            builder.Services.AddSingleton<ErrorIngestionService>();
             builder.Services.AddSingleton<IAppQueries, AppQueries>();
             builder.Services.AddSingleton<IIngestionCache, IngestionCache>();
             builder.Services.AddSingleton<IRejectionStats, RejectionStats>();
             builder.Services.AddMemoryCache();
             builder.Services.AddSingleton<IErrorQueryClient>(new ClickHouseErrorQueryClient(new RejectAnalyticsQueries()));
             builder.Services.AddControllers().AddApplicationPart(typeof(ErrorsController).Assembly);
-            builder.Services.AddCors(options => options.AddPolicy("AllowAny", policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+            builder.Services.AddCors(options => {
+                options.AddPolicy("AllowAny", policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
+                options.AddPolicy("SentryIngestion", policy => policy.AllowAnyOrigin().AllowAnyHeader().WithMethods("POST", "OPTIONS"));
+            });
+            builder.Services.AddRateLimiter(o => o.AddFixedWindowLimiter("Stats", p => { p.PermitLimit = 100; p.Window = TimeSpan.FromMinutes(1); }));
             builder.Services.AddRateLimiter(options => options.AddFixedWindowLimiter("EventIngestion", limiter =>
             {
                 limiter.PermitLimit = 100;
@@ -70,6 +80,11 @@ public class IssueIngestionTests
             app.UseRouting();
             app.UseCors();
             app.UseRateLimiter();
+            app.Use(async (context, next) => {
+                if (context.Request.Headers.ContainsKey("Test-Owner"))
+                    context.User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("id", "owner"), new Claim("email", "owner@example.test") }, "test"));
+                await next();
+            });
             app.MapControllers();
             await app.StartAsync();
             using var http = app.GetTestClient();
@@ -188,11 +203,107 @@ public class IssueIngestionTests
             Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_outbox"));
             Assert.Equal(pending, sink.Received.Distinct().Count());
             Assert.True(sink.Received.Count > pending); // Lost acknowledgements permit raw sink replay; reads deduplicate IDs.
+            await CheckSentry(http, connection, app.GetTestServer());
             await app.StopAsync();
         }
         finally
         {
             await admin.ExecuteAsync($"DROP DATABASE {database} WITH (FORCE)");
+        }
+    }
+
+    private static async Task CheckSentry(HttpClient http, System.Data.Common.DbConnection connection, TestServer server)
+    {
+        const string route = "/api/v0/apps/app-b/sentry-projects";
+        Assert.Equal(HttpStatusCode.Unauthorized, (await http.PostAsync(route, null)).StatusCode);
+        http.DefaultRequestHeaders.Add("Test-Owner", "true");
+        using var provision = await http.PostAsync(route, null);
+        Assert.Equal(HttpStatusCode.OK, provision.StatusCode);
+        using var projects = JsonDocument.Parse(await provision.Content.ReadAsStringAsync());
+        var entries = projects.RootElement.GetProperty("projects").EnumerateArray().ToArray();
+        Assert.Equal(2, entries.Length);
+        Assert.Equal(HttpStatusCode.OK, (await http.PostAsync(route, null)).StatusCode);
+        Assert.Equal(2, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM sentry_projects"));
+        http.DefaultRequestHeaders.Remove("Test-Owner");
+        var projectId = entries[0].GetProperty("id").GetString();
+        var dsn = entries[0].GetProperty("dsn").GetString();
+        var endpoint = $"/api/{projectId}/envelope/";
+        var eventId = Guid.NewGuid().ToString("N");
+        string Envelope(string type = "event", string? extra = null) => JsonSerializer.Serialize(new { dsn, event_id = eventId }) + "\n" +
+            JsonSerializer.Serialize(new { type }) + "\n" + JsonSerializer.Serialize(new {
+                event_id = eventId, message = "Sentry owner@example.test", timestamp = DateTime.UtcNow,
+                release = "2.0.0", environment = "desktop", user = new { email = "discard@example.test" },
+                extra = new { secret = "must-not-store" }
+            }) + "\n" + extra;
+        Task<HttpResponseMessage> Send(string data, string suffix = "") => http.PostAsync(endpoint + suffix, new StringContent(data, Encoding.UTF8, "application/x-sentry-envelope"));
+        var before = await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts");
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, (await Send(Envelope(extra: "{\"type\":\"attachment\"}\nprivate"))).StatusCode);
+        Assert.Equal(before, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts"));
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, (await Send(Envelope("session"))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await Send(Envelope(), "?sentry_key=KEY-A")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await Send("{}\n{\"type\":\"event\",\"length\":\"wrong\"}\n{}" )).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await Send(Envelope())).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await Send(Envelope())).StatusCode);
+        Assert.Equal(before + 1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts"));
+        var retained = await connection.ExecuteScalarAsync<string>("SELECT row_to_json(r)::text FROM error_receipts r WHERE event_id=@id", new { id = Guid.Parse(eventId) });
+        Assert.Contains("[EMAIL_REDACTED]", retained);
+        Assert.DoesNotContain("must-not-store", retained);
+        Assert.DoesNotContain("discard@example.test", retained);
+        Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts WHERE app_id='app-a' AND event_id=@id", new { id = Guid.Parse(eventId) }));
+        var transactionId = Guid.NewGuid().ToString("N");
+        var payload = JsonSerializer.Serialize(new { event_id = transactionId, type = "transaction", transaction = "app.startup", start_timestamp = 1800000000.0, timestamp = 1800000000.5,
+            contexts = new { trace = new { span_id = "1111111111111111", op = "ui.load", status = "ok" } },
+            spans = new[] { new { span_id = "2222222222222222", parent_span_id = "1111111111111111", op = "file.read", description = "private path", start_timestamp = 1800000000.1, timestamp = 1800000000.2 } } });
+        var transactionEnvelope = JsonSerializer.Serialize(new { dsn }) + "\n{\"type\":\"transaction\"}\n" + payload;
+        Assert.Equal(HttpStatusCode.OK, (await Send(transactionEnvelope)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await Send(transactionEnvelope)).StatusCode);
+        Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM app_transactions WHERE event_id=@id", new { id = Guid.Parse(transactionId) }));
+        using var zipped = new MemoryStream();
+        using (var gzip = new System.IO.Compression.GZipStream(zipped, System.IO.Compression.CompressionMode.Compress, true))
+            gzip.Write(Encoding.UTF8.GetBytes(transactionEnvelope));
+        using var content = new ByteArrayContent(zipped.ToArray());
+        content.Headers.ContentEncoding.Add("gzip");
+        Assert.Equal(HttpStatusCode.OK, (await http.PostAsync(endpoint, content)).StatusCode);
+        var sdkResponses = new System.Collections.Concurrent.ConcurrentQueue<HttpStatusCode>();
+        using (global::Sentry.SentrySdk.Init(options => {
+            options.Dsn = dsn;
+            options.Release = "sdk-probe-6.10.0";
+            options.Environment = "test";
+            options.SendDefaultPii = false;
+            options.SendClientReports = false;
+            options.AutoSessionTracking = false;
+            options.TracesSampleRate = 1;
+            options.DisableDiagnosticSourceIntegration();
+            options.DisableAppDomainUnhandledExceptionCapture();
+            options.DisableUnobservedTaskExceptionCapture();
+            options.DisableAppDomainProcessExitFlush();
+            // Actual SDK serialization/compression/auth, exclusively routed to the in-memory HTTP server.
+            options.CreateHttpMessageHandler = () => new SdkResponseHandler(server.CreateHandler(), sdkResponses);
+        }))
+        {
+            global::Sentry.SentrySdk.CaptureException(new InvalidOperationException("SDK test owner@example.test"));
+            var transaction = global::Sentry.SentrySdk.StartTransaction("sdk.startup", "ui.load");
+            var span = transaction.StartChild("file.read");
+            span.Finish();
+            transaction.Finish();
+            await global::Sentry.SentrySdk.FlushAsync(TimeSpan.FromSeconds(10));
+        }
+        Assert.Equal(2, sdkResponses.Count);
+        Assert.All(sdkResponses, status => Assert.Equal(HttpStatusCode.OK, status));
+        Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts WHERE release='sdk-probe-6.10.0'"));
+        Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM app_transactions WHERE release='sdk-probe-6.10.0'"));
+        await connection.ExecuteAsync("UPDATE apps SET deleted_at=CURRENT_TIMESTAMP WHERE id='app-b'");
+        Assert.Equal(HttpStatusCode.Forbidden, (await Send(Envelope())).StatusCode);
+    }
+
+    private sealed class SdkResponseHandler(HttpMessageHandler inner, System.Collections.Concurrent.ConcurrentQueue<HttpStatusCode> statuses) : DelegatingHandler(inner)
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Assert.Equal("localhost", request.RequestUri!.Host);
+            var response = await base.SendAsync(request, cancellationToken);
+            statuses.Enqueue(response.StatusCode);
+            return response;
         }
     }
 

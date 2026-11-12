@@ -51,6 +51,7 @@ public partial class Program
 
         builder.Services.AddCors(options =>
         {
+            options.AddPolicy("SentryIngestion", policy => policy.AllowAnyOrigin().AllowAnyHeader().WithMethods("POST", "OPTIONS"));
             options.AddPolicy(name: "AllowAptabaseCom", policy =>
             {
                 policy.WithOrigins("https://aptabase.com")
@@ -162,6 +163,7 @@ public partial class Program
         builder.Services.AddSingleton<IEventBuffer, InMemoryEventBuffer>();
         builder.Services.AddSingleton<ErrorOutbox>();
         builder.Services.AddSingleton<IIssueStore, IssueStore>();
+        builder.Services.AddSingleton<ErrorIngestionService>();
         builder.Services.AddHostedService<PurgeErrorReceiptsJob>();
         builder.Services.AddSingleton<PerformanceStore>();
         builder.Services.AddHostedService<PurgeTransactionsJob>();
