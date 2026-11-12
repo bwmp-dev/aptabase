@@ -13,6 +13,18 @@ public class PiiSanitizerTests
         _sanitizer = new PiiSanitizer();
     }
 
+    [Theory]
+    [InlineData("Failed https://person:short@api.example.test/private-user/secret?token=abc#private", "Failed [URL_REDACTED]")]
+    [InlineData("password=short", "password=[KEY_REDACTED]")]
+    [InlineData("access_token=abc&state=ok", "access_token=[KEY_REDACTED]&state=ok")]
+    [InlineData("\"password\":\"short\"", "\"password\":\"[KEY_REDACTED]\"")]
+    [InlineData("auth failed", "auth failed")]
+    [InlineData("Authorization: Bearer short", "Authorization: Bearer [KEY_REDACTED]")]
+    public void Sanitizes_Url_And_Short_Explicit_Credentials(string input, string expected)
+    {
+        _sanitizer.Sanitize(input).Should().Be(expected);
+    }
+
     [Fact]
     public void Sanitize_Should_Return_Empty_String_For_Null_Input()
     {

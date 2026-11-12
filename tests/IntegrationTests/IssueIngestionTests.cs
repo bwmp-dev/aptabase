@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Security.Claims;
 using Aptabase.Features.Sentry;
+using Aptabase.Features.Monitoring;
 using Aptabase.Data;
 using Aptabase.Features;
 using Aptabase.Features.Apps;
@@ -83,6 +84,8 @@ public class IssueIngestionTests
             app.Use(async (context, next) => {
                 if (context.Request.Headers.ContainsKey("Test-Owner"))
                     context.User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("id", "owner"), new Claim("email", "owner@example.test") }, "test"));
+                if (context.Request.Headers.ContainsKey("Test-Reader"))
+                    context.User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("id", "reader"), new Claim("email", "reader@example.test") }, "test"));
                 await next();
             });
             app.MapControllers();
@@ -203,13 +206,111 @@ public class IssueIngestionTests
             Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_outbox"));
             Assert.Equal(pending, sink.Received.Distinct().Count());
             Assert.True(sink.Received.Count > pending); // Lost acknowledgements permit raw sink replay; reads deduplicate IDs.
+            await CheckControls(http, connection, db, store, performance);
             await CheckSentry(http, connection, app.GetTestServer());
+            await store.PurgeExpiredReceipts(default); await performance.Purge(default);
+            Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_issues WHERE app_id='app-b'"));
+            Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_outbox WHERE app_id='app-b'"));
+            Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM app_transactions WHERE app_id='app-b'"));
+            Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM sentry_projects WHERE app_id='app-b'"));
+            Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_issues WHERE app_id='app-d'"));
             await app.StopAsync();
         }
         finally
         {
             await admin.ExecuteAsync($"DROP DATABASE {database} WITH (FORCE)");
         }
+    }
+
+    private static async Task CheckControls(HttpClient http, System.Data.Common.DbConnection connection, IDbContext db, IssueStore store, PerformanceStore performance)
+    {
+        await connection.ExecuteAsync("""
+            INSERT INTO apps (id, owner_id, name, app_key, error_quota, has_events) VALUES ('app-c','owner','C','KEY-C',100,false), ('app-d','owner','D','KEY-D',100,false);
+            INSERT INTO app_shares (app_id,email) VALUES ('app-c','reader@example.test');
+            """);
+        const string route = "/api/v0/apps/app-c/monitoring";
+        var settings = new MonitoringSettings { LocalAlertsEnabled = true };
+        Assert.Equal(HttpStatusCode.Unauthorized, (await http.GetAsync(route + "/settings")).StatusCode);
+        http.DefaultRequestHeaders.Add("Test-Reader", "true");
+        Assert.Equal(HttpStatusCode.Forbidden, (await http.PutAsJsonAsync(route + "/settings", settings)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await http.GetAsync(route + "/alerts")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await http.GetAsync(route + "/data")).StatusCode);
+        http.DefaultRequestHeaders.Remove("Test-Reader");
+        http.DefaultRequestHeaders.Add("Test-Owner", "true");
+        Assert.Equal(HttpStatusCode.BadRequest, (await http.PutAsJsonAsync(route + "/settings", new { captureErrors = true })).StatusCode);
+        settings.MonitoringRetentionDays = 31;
+        Assert.Equal(HttpStatusCode.BadRequest, (await http.PutAsJsonAsync(route + "/settings", settings)).StatusCode);
+        settings.MonitoringRetentionDays = 1;
+        Assert.Equal(HttpStatusCode.OK, (await http.PutAsJsonAsync(route + "/settings", settings)).StatusCode);
+        http.DefaultRequestHeaders.Remove("App-Key"); http.DefaultRequestHeaders.Add("App-Key", "KEY-C");
+        var eventId = Guid.NewGuid();
+        await connection.ExecuteAsync("ALTER TABLE monitoring_alerts ADD CONSTRAINT test_alert_failure CHECK (kind <> 'new_issue') NOT VALID");
+        await Assert.ThrowsAsync<PostgresException>(() => store.Record(new TrackingError {
+            AppId="app-c", ErrorId=eventId.ToString(), ErrorType="Local alert", ErrorMessage="sanitized", Timestamp=DateTime.UtcNow
+        }, default, true));
+        Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT error_count FROM apps WHERE id='app-c'"));
+        Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts WHERE app_id='app-c'"));
+        Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_issues WHERE app_id='app-c'"));
+        Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_outbox WHERE app_id='app-c'"));
+        await connection.ExecuteAsync("ALTER TABLE monitoring_alerts DROP CONSTRAINT test_alert_failure");
+        object Error(Guid id, string type = "Local alert") => new { eventId = id, errorType = type, errorMessage = "sanitized", timestamp = DateTime.UtcNow };
+        var responses = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => http.PostAsJsonAsync("/api/v0/error", Error(eventId))));
+        Assert.All(responses, r => Assert.Equal(HttpStatusCode.Accepted, r.StatusCode));
+        Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM monitoring_alerts WHERE app_id='app-c'"));
+        await connection.ExecuteAsync("UPDATE error_issues SET status='resolved',resolved_at=CURRENT_TIMESTAMP - INTERVAL '1 day' WHERE app_id='app-c'");
+        Assert.Equal(HttpStatusCode.Accepted, (await http.PostAsJsonAsync("/api/v0/error", Error(Guid.NewGuid()))).StatusCode);
+        Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM monitoring_alerts WHERE app_id='app-c'"));
+        await connection.ExecuteAsync("""
+            UPDATE error_issues SET status='resolved',resolved_at=CURRENT_TIMESTAMP - INTERVAL '1 day' WHERE app_id='app-c';
+            UPDATE monitoring_alert_state SET last_notified_at=CURRENT_TIMESTAMP - INTERVAL '2 hours' WHERE app_id='app-c';
+            """);
+        Assert.Equal(HttpStatusCode.Accepted, (await http.PostAsJsonAsync("/api/v0/error", Error(Guid.NewGuid()))).StatusCode);
+        Assert.Equal(2, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM monitoring_alerts WHERE app_id='app-c'"));
+        Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM monitoring_alerts WHERE app_id='app-c' AND kind='regression'"));
+        Assert.Equal(HttpStatusCode.OK, (await http.GetAsync(route + "/alerts")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await http.GetAsync(route + "/alerts?limit=101")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await http.PatchAsync(route + $"/alerts/{eventId}/read?buildMode=debug", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await http.PatchAsync(route + $"/alerts/{eventId}/read", null)).StatusCode);
+        var readAt = await connection.ExecuteScalarAsync<DateTime>("SELECT read_at FROM monitoring_alerts WHERE app_id='app-c' AND event_id=@eventId", new { eventId });
+        Assert.Equal(HttpStatusCode.NoContent, (await http.PatchAsync(route + $"/alerts/{eventId}/read", null)).StatusCode);
+        Assert.Equal(readAt, await connection.ExecuteScalarAsync<DateTime>("SELECT read_at FROM monitoring_alerts WHERE app_id='app-c' AND event_id=@eventId", new { eventId }));
+        settings.LocalAlertsEnabled = false; settings.ForwardRawErrors = false;
+        Assert.Equal(HttpStatusCode.OK, (await http.PutAsJsonAsync(route + "/settings", settings)).StatusCode);
+        Assert.Equal(HttpStatusCode.Accepted, (await http.PostAsJsonAsync("/api/v0/error", Error(Guid.NewGuid(), "Other issue"))).StatusCode);
+        Assert.Equal(2, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM monitoring_alerts WHERE app_id='app-c'"));
+        var sink = new LocalErrorSink();
+        await new ErrorOutbox(db, sink).Flush();
+        Assert.DoesNotContain(sink.Received, r => r.StartsWith("app-c:"));
+        Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_outbox WHERE app_id='app-c'"));
+        var transaction = new TransactionBody { EventId = Guid.NewGuid().ToString(), Name = "app.startup", Operation = "ui.load", Timestamp = DateTime.UtcNow, DurationMs = 100 };
+        Assert.Equal(HttpStatusCode.Accepted, (await http.PostAsJsonAsync("/api/v0/transaction", transaction)).StatusCode);
+        await performance.Record("app-d", transaction, default);
+        await store.Record(new TrackingError { AppId="app-d", ErrorId=Guid.NewGuid().ToString(), ErrorType="Other", ErrorMessage="Other", Timestamp=DateTime.UtcNow }, default);
+        await connection.ExecuteAsync("UPDATE error_receipts SET received_at=CURRENT_TIMESTAMP - INTERVAL '2 days' WHERE app_id IN ('app-c','app-d'); UPDATE app_transactions SET received_at=CURRENT_TIMESTAMP - INTERVAL '2 days' WHERE app_id IN ('app-c','app-d')");
+        await connection.ExecuteAsync("UPDATE error_outbox SET created_at=CURRENT_TIMESTAMP - INTERVAL '31 days' WHERE app_id='app-d'");
+        await store.PurgeExpiredReceipts(default); await performance.Purge(default);
+        Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_outbox WHERE app_id='app-d'"));
+        Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts WHERE app_id='app-c'"));
+        Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts WHERE app_id='app-d'"));
+        Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM app_transactions WHERE app_id='app-c'"));
+        Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM app_transactions WHERE app_id='app-d'"));
+        async Task<HttpResponseMessage> Clear(string confirm) => await http.SendAsync(new HttpRequestMessage(HttpMethod.Delete, route + "/data") { Content = JsonContent.Create(new { confirmAppId = confirm }) });
+        Assert.Equal(HttpStatusCode.OK, (await http.GetAsync(route + "/data")).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await Clear("app-c")).StatusCode);
+        settings.CaptureErrors = false; settings.CapturePerformance = false;
+        Assert.Equal(HttpStatusCode.OK, (await http.PutAsJsonAsync(route + "/settings", settings)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await http.PostAsJsonAsync("/api/v0/error", Error(Guid.NewGuid()))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await http.PostAsJsonAsync("/api/v0/transaction", transaction)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await Clear("app-d")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await Clear("app-c")).StatusCode);
+        Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_issues WHERE app_id='app-c'"));
+        Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM monitoring_alerts WHERE app_id='app-c'"));
+        Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_issues WHERE app_id='app-d'"));
+        await connection.ExecuteAsync("UPDATE monitoring_alerts SET created_at=CURRENT_TIMESTAMP - INTERVAL '31 days'; UPDATE monitoring_alert_state SET last_notified_at=CURRENT_TIMESTAMP - INTERVAL '31 days'");
+        await store.PurgeExpiredReceipts(default);
+        Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM monitoring_alerts"));
+        Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM monitoring_alert_state"));
+        http.DefaultRequestHeaders.Remove("Test-Owner");
     }
 
     private static async Task CheckSentry(HttpClient http, System.Data.Common.DbConnection connection, TestServer server)
@@ -292,6 +393,14 @@ public class IssueIngestionTests
         Assert.All(sdkResponses, status => Assert.Equal(HttpStatusCode.OK, status));
         Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts WHERE release='sdk-probe-6.10.0'"));
         Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM app_transactions WHERE release='sdk-probe-6.10.0'"));
+        await connection.ExecuteAsync("UPDATE apps SET capture_errors=false,capture_performance=false WHERE id='app-b'");
+        Assert.Equal(HttpStatusCode.Forbidden, (await Send(Envelope())).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await Send(transactionEnvelope)).StatusCode);
+        using var huge = new MemoryStream();
+        using (var gzip = new System.IO.Compression.GZipStream(huge, System.IO.Compression.CompressionMode.Compress, true))
+            gzip.Write(new byte[SentryEnvelopeParser.MaxBytes + 1]);
+        using var hugeContent = new ByteArrayContent(huge.ToArray()); hugeContent.Headers.ContentEncoding.Add("gzip");
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, (await http.PostAsync(endpoint, hugeContent)).StatusCode);
         await connection.ExecuteAsync("UPDATE apps SET deleted_at=CURRENT_TIMESTAMP WHERE id='app-b'");
         Assert.Equal(HttpStatusCode.Forbidden, (await Send(Envelope())).StatusCode);
     }

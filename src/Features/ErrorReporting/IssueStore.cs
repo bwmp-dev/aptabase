@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Aptabase.Data;
+using Aptabase.Features.Monitoring;
 using Aptabase.Features.Authentication;
 using Aptabase.Features.ErrorReporting.Buffer;
 using Dapper;
@@ -59,6 +60,13 @@ public class IssueStore(IDbContext db) : IIssueStore
         await using var connection = db.Connection;
         await connection.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        // Serialize capture/settings/purge for this app; policy changes also lock the same app row.
+        var policy = await connection.QuerySingleOrDefaultAsync<MonitoringSettings>(new CommandDefinition("""
+            SELECT a.capture_errors, a.forward_raw_errors, a.local_alerts_enabled, a.alert_cooldown_minutes
+            FROM apps a JOIN users u ON u.id=a.owner_id
+            WHERE a.id=@AppId AND a.deleted_at IS NULL AND u.lock_reason IS NULL FOR UPDATE OF a
+            """, new { error.AppId }, transaction, cancellationToken: cancellationToken));
+        if (policy is null || !policy.CaptureErrors) return IssueRecordResult.AppUnavailable;
         var parameters = new { error.AppId, error.IsDebug, eventId = Guid.Parse(error.ErrorId),
             issueId = IssueFingerprint.Create(error.ErrorType, error.ErrorMessage, error.StackTrace), error.Timestamp,
             error.ErrorMessage, stackTrace = error.StackTrace ?? "", release = error.Release ?? "", environment = error.Environment ?? "",
@@ -93,7 +101,7 @@ public class IssueStore(IDbContext db) : IIssueStore
             if (consumed == 0) return IssueRecordResult.QuotaExceeded;
         }
 
-        await connection.ExecuteAsync(new CommandDefinition("""
+        var alertKind = await connection.ExecuteScalarAsync<string?>(new CommandDefinition("""
             INSERT INTO error_issues (app_id, is_debug, id, error_type, error_message, stack_trace, first_seen, last_seen)
             VALUES (@AppId, @IsDebug, @id, @ErrorType, @ErrorMessage, @stack, @Timestamp, @Timestamp)
             ON CONFLICT (app_id, is_debug, id) DO UPDATE SET
@@ -101,16 +109,33 @@ public class IssueStore(IDbContext db) : IIssueStore
                 first_seen = LEAST(error_issues.first_seen, EXCLUDED.first_seen),
                 last_seen = GREATEST(error_issues.last_seen, EXCLUDED.last_seen),
                 status = CASE WHEN EXCLUDED.last_seen > error_issues.resolved_at THEN 'unresolved' ELSE error_issues.status END,
-                resolved_at = CASE WHEN EXCLUDED.last_seen > error_issues.resolved_at THEN NULL ELSE error_issues.resolved_at END
-            """, new { error.AppId, error.IsDebug,
+                resolved_at = CASE WHEN EXCLUDED.last_seen > error_issues.resolved_at THEN NULL ELSE error_issues.resolved_at END,
+                last_reopened_event_id = CASE WHEN EXCLUDED.last_seen > error_issues.resolved_at THEN @eventId ELSE error_issues.last_reopened_event_id END
+            RETURNING CASE WHEN occurrence_count = 1 THEN 'new_issue'
+                WHEN last_reopened_event_id = @eventId THEN 'regression' ELSE NULL END
+            """, new { error.AppId, error.IsDebug, eventId = Guid.Parse(error.ErrorId),
                 id = IssueFingerprint.Create(error.ErrorType, error.ErrorMessage, error.StackTrace),
                 error.ErrorType, error.ErrorMessage, stack = error.StackTrace ?? "", error.Timestamp },
             transaction, cancellationToken: cancellationToken));
-        await connection.ExecuteAsync(new CommandDefinition("""
+        if (policy.ForwardRawErrors) await connection.ExecuteAsync(new CommandDefinition("""
             INSERT INTO error_outbox (app_id, is_debug, event_id, payload)
             VALUES (@AppId, @IsDebug, @eventId, CAST(@payload AS jsonb)) ON CONFLICT DO NOTHING
             """, new { error.AppId, error.IsDebug, eventId = Guid.Parse(error.ErrorId), payload = JsonSerializer.Serialize(error) },
             transaction, cancellationToken: cancellationToken));
+        if (policy.LocalAlertsEnabled && alertKind is not null)
+        {
+            await connection.ExecuteAsync(new CommandDefinition("""
+                WITH eligible AS (
+                    INSERT INTO monitoring_alert_state (app_id, is_debug, issue_id, last_notified_at)
+                    VALUES (@AppId, @IsDebug, @issueId, CURRENT_TIMESTAMP)
+                    ON CONFLICT (app_id, is_debug, issue_id) DO UPDATE SET last_notified_at=CURRENT_TIMESTAMP
+                    WHERE monitoring_alert_state.last_notified_at <= CURRENT_TIMESTAMP - @cooldown * INTERVAL '1 minute'
+                    RETURNING 1)
+                INSERT INTO monitoring_alerts (app_id, is_debug, event_id, issue_id, kind)
+                    SELECT @AppId, @IsDebug, @eventId, @issueId, @alertKind FROM eligible ON CONFLICT DO NOTHING
+                """, new { error.AppId, error.IsDebug, eventId = Guid.Parse(error.ErrorId), parameters.issueId,
+                    alertKind, cooldown = policy.AlertCooldownMinutes }, transaction, cancellationToken: cancellationToken));
+        }
         await transaction.CommitAsync(cancellationToken);
         return IssueRecordResult.Accepted;
     }
@@ -120,9 +145,28 @@ public class IssueStore(IDbContext db) : IIssueStore
         await using var connection = db.Connection;
         return await connection.ExecuteAsync(new CommandDefinition("""
             DELETE FROM error_receipts WHERE (app_id, is_debug, event_id) IN (
-                SELECT app_id, is_debug, event_id FROM error_receipts
-                WHERE received_at < CURRENT_TIMESTAMP - INTERVAL '30 days'
-                ORDER BY received_at LIMIT 10000 FOR UPDATE SKIP LOCKED)
+                SELECT r.app_id, r.is_debug, r.event_id FROM error_receipts r JOIN apps a ON a.id=r.app_id
+                WHERE r.received_at < CURRENT_TIMESTAMP - a.monitoring_retention_days * INTERVAL '1 day' OR a.deleted_at IS NOT NULL
+                ORDER BY r.received_at LIMIT 10000 FOR UPDATE OF r SKIP LOCKED);
+            DELETE FROM monitoring_alerts WHERE (app_id, is_debug, event_id) IN (
+                SELECT app_id, is_debug, event_id FROM monitoring_alerts WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '30 days'
+                    OR app_id IN (SELECT id FROM apps WHERE deleted_at IS NOT NULL)
+                ORDER BY created_at LIMIT 10000 FOR UPDATE SKIP LOCKED);
+            DELETE FROM monitoring_alert_state WHERE (app_id, is_debug, issue_id) IN (
+                SELECT app_id, is_debug, issue_id FROM monitoring_alert_state WHERE last_notified_at < CURRENT_TIMESTAMP - INTERVAL '30 days'
+                    OR app_id IN (SELECT id FROM apps WHERE deleted_at IS NOT NULL)
+                ORDER BY last_notified_at LIMIT 10000 FOR UPDATE SKIP LOCKED);
+            DELETE FROM error_outbox WHERE (app_id, is_debug, event_id) IN (
+                SELECT o.app_id, o.is_debug, o.event_id FROM error_outbox o JOIN apps a ON a.id=o.app_id
+                WHERE a.deleted_at IS NOT NULL OR NOT a.forward_raw_errors
+                    OR o.created_at < CURRENT_TIMESTAMP - a.monitoring_retention_days * INTERVAL '1 day'
+                ORDER BY o.created_at LIMIT 10000 FOR UPDATE OF o SKIP LOCKED);
+            DELETE FROM error_issues WHERE (app_id, is_debug, id) IN (
+                SELECT i.app_id, i.is_debug, i.id FROM error_issues i JOIN apps a ON a.id=i.app_id
+                WHERE a.deleted_at IS NOT NULL LIMIT 10000 FOR UPDATE OF i SKIP LOCKED);
+            DELETE FROM sentry_projects WHERE id IN (
+                SELECT p.id FROM sentry_projects p JOIN apps a ON a.id=p.app_id
+                WHERE a.deleted_at IS NOT NULL LIMIT 10000 FOR UPDATE OF p SKIP LOCKED)
             """, cancellationToken: cancellationToken));
     }
 

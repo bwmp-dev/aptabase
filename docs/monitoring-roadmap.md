@@ -34,9 +34,9 @@ The fork's LICENSE and attribution remain unchanged. Any future copied source re
 
 ### 2. Triage context, environments and releases
 - [x] Backend bounded sanitized event context/detail, latest/recent occurrences linked to issue; no request bodies, cookies, headers, user IDs or session identities by default.
-- [x] Backend explicit environment and release labels; preserve debug/release build mode as a separate dimension. Filter by environment/release, type/severity and first/last seen; parameterized search.
+- [x] Backend explicit environment and release labels; preserve debug/release build mode as a separate dimension. Issue filters: status, literal search, environment and release. Raw logs retain their existing type/severity/time filters; performance has time/name/operation filters.
 - [x] Backend observed release/environment catalog from retained errors/transactions.
-- [ ] Release/context frontend and deeper release regression indicators.
+- [ ] Release/context frontend (Opus in progress). Deeper release regression comparisons are deferred; observed labels are not deployment records.
 - [ ] Acceptance: same fingerprint across releases remains one issue; environment filter semantics documented; access checks on every detail/query; oversized/high-cardinality context rejected or bounded.
 
 ### 3. Sentry SDK intake subset
@@ -46,22 +46,26 @@ The fork's LICENSE and attribution remain unchanged. Any future copied source re
 - [x] Publish a tested compatibility matrix (`sentry-compatibility.md`). Initial subset excludes attachments, minidumps, replay, profiles, source-map uploads/symbolication and Sentry management APIs. Do not advertise universal Sentry compatibility.
 
 ### 4. Privacy and retention
-- [ ] Automatic bounded receipt expiry; scoped issue/event deletion and app deletion cleanup.
-- [ ] Retention policies for raw events, context, issues and future traces, implemented consistently on both analytics backends; preview/count before user-requested destructive purge.
-- [ ] Sanitization tests for URLs, source paths and nested allowlisted context. No new personal-data identifiers to compute affected-user counts.
-- [ ] Acceptance: retention cannot cross tenants; counts and deduplication guarantees describe expiry honestly; migrations and cleanup tested.
+- [x] Owner capture switches enforced transactionally on both native/Sentry ingestion; no cached-policy bypass.
+- [x] Owner 1..30-day detail/transaction retention, bounded expiry, app/build isolation, disabled-capture prerequisite for confirmed PostgreSQL monitoring purge with preview counts.
+- [x] Raw-forwarding opt-out and pending outbox suppression. Both analytics backends retain their existing 180-day raw TTL; retroactive raw-log erasure is explicitly excluded from PostgreSQL purge. Issue summaries persist until explicit purge.
+- [x] Allowlisted Sentry context discards request/user/extra/local variables, absolute source paths and span descriptions. No new affected-user identifiers. Existing sanitizer tests cover common PII; arbitrary free text still requires SDK-side minimization.
+- [x] Acceptance: tenant retention/purge isolation, missing settings/invalid bounds, shared-reader denial, soft deletion intake denial, physical-delete cascades, migration down/up and retry window semantics tested/documented.
+- [ ] Owner controls frontend and headless acceptance (Opus queued).
 
-### 5. Optional app error alerts (local delivery only until authorized)
-- [ ] Owner-managed rules for new issues/regressions and event-rate thresholds, environment filters, cooldown/deduplication and mute.
-- [ ] Transactional delivery queue with retry/backoff, bounded payloads, delivery status and secret-safe logging.
-- [ ] Test via local/mocked sinks only. Real email/webhook delivery needs explicit authorization. Webhook targets need SSRF protection, DNS/redirect validation and timeouts before activation.
-- [ ] Acceptance: retries do not generate duplicate notifications, revoked ownership cannot modify rules, disabled rules cannot send.
+### 5. Local app error alerts
+- [x] Owner opt-in new-issue/regression alerts with per-issue/build cooldown and disable switch. Native/Sentry issue grouping/reopen semantics apply; no synthetic backlog on enable.
+- [x] Transactional durable local inbox, read state, 30-day expiry, bounded owner-only list, retry deduplication; no error free text copied into alerts.
+- [x] Acceptance: concurrent duplicate reports, cooldown suppression, eligible regression, disabled rules, read idempotency, wrong-build access, retention and cross-app cleanup tested locally. No external delivery invoked.
+- [ ] Owner inbox/configuration frontend and headless acceptance (Opus queued).
+
+Rate/threshold rules, external delivery queues/backoff and channel configuration are deferred pending owner channel/volume requirements. The implemented delivery target is the local inbox, not an email/webhook sender. No external integration is silently simulated or advertised.
 
 ### 6. App performance and instrumentation (priority after reliability/context)
 - [x] Bounded sampled transaction/span ingestion for desktop/mobile operations (startup, navigation, rendering, local work and app network calls); no automatic unsampled collection.
 - [x] Self-hosted PostgreSQL storage first, with 30-day event retention and indexed app/build/time queries. Preserve existing ClickHouse/Tinybird analytics unchanged. Reassess storage against measured volume before claiming scale.
 - [ ] App-scoped latency summaries (count, errors, p50/p95) and transaction/span details, filtered by environment/release/time. Never collect request payloads, user identifiers or full URLs by default.
-- [ ] Acceptance: duration/span/count/name bounds, retry deduplication, malformed parent relationships, tenant access and percentile fixtures tested.
+- [x] Backend acceptance: duration/span/count/name bounds, retry deduplication, malformed parent relationships, tenant access and percentile fixtures tested.
 - [x] Desktop/mobile instrumentation docs and examples explaining stable operation names, sampling, monotonic durations, offline retry IDs and privacy boundaries.
 - [ ] Headless frontend-to-backend tests and narrow/desktop visual checks with local fixture data.
 
@@ -69,7 +73,7 @@ The fork's LICENSE and attribution remain unchanged. Any future copied source re
 
 Confirmed: self-hosted desktop/mobile app error tracking and performance; not hosted SaaS or website uptime. Preserve existing app authorization and quotas, but do not expand billing or SaaS features. No uptime monitors or public status pages are planned.
 
-Proposed implementation defaults: 30-day detailed event/transaction retention; issue summaries persist until explicitly deleted. App/build scopes remain authorization-neutral grouping boundaries. Releases/environments label occurrences; a post-resolution occurrence in any environment can reopen the group. Document this explicitly before exposing filters.
+Implemented defaults: owner-configurable 1..30-day detailed event/transaction retention (30 by default); issue summaries persist until explicitly deleted. App/build scopes remain authorization-neutral grouping boundaries. Releases/environments label occurrences; a post-resolution occurrence in any environment can reopen the group. Document this explicitly before exposing filters.
 
 Remaining input useful but not blocking independent work:
 - First desktop/mobile SDK languages to prioritize; initial examples can cover .NET and generic HTTP. Sentry compatibility remains a tested subset, not universal.
@@ -111,7 +115,7 @@ Retained occurrences now carry sanitized message/stack and allowlisted app/OS/SD
 
 ### Durable raw delivery increment
 
-Replaced the in-memory error buffer with a transactional PostgreSQL outbox. A worker locks at most 200 queued rows, applies a 30-second delivery deadline, and removes them only after full acknowledgement. Failures/partial acknowledgement roll back; restart retries from the database. Delivered payloads are deleted immediately. Undelivered payloads preserve the existing raw fields (including legacy sessionId) for delivery; reports past the existing raw 180-day TTL are removed without sending. Retained issue details still exclude sessionId. This does not change usage-event buffering.
+Replaced the in-memory error buffer with a transactional PostgreSQL outbox. A worker locks at most 200 queued rows, applies a 30-second delivery deadline, and removes them only after full acknowledgement. Failures/partial acknowledgement roll back; restart retries from the database. Delivered payloads are deleted immediately. Undelivered payloads preserve the existing raw fields (including legacy sessionId) for delivery, now bounded by the app detail retention window; reports past the existing raw 180-day TTL are removed without sending. Retained issue details still exclude sessionId. This does not change usage-event buffering.
 
 Passed: 248 unit tests and both PostgreSQL/HTTP scenarios, now including lost acknowledgements, partial success and concurrent outbox workers. `python scripts/test-error-query-dedup.py` passed actual ClickHouse query templates against duplicate fixtures using a network-disabled cached ClickHouse 24.8 local process (0.5 CPU/512MB, no server). Matching Tinybird templates changed; hosted Tinybird execution remains unrun. Older ClickHouse local verifies syntax/behavior, not a full production 26.8 deployment.
 
@@ -124,3 +128,9 @@ Added native desktop/mobile instrumentation guidance and a dependency-free .NET 
 ### Sentry adapter checkpoint
 
 264 unit tests passed; both focused PostgreSQL/HTTP scenarios passed after correcting a test-helper connection type. The ingestion scenario then passed with actual Sentry .NET 6.10.0 exception and transaction/span delivery through TestServer. No external telemetry sent. Separate owner-provisioned release/debug projects map to existing app keys. See `sentry-compatibility.md` for exact subset and platform gaps.
+
+### Monitoring controls and local-alert checkpoint
+
+264 unit tests and both focused PostgreSQL/HTTP scenarios passed after adding capture/retention/purge and local inbox. New checks cover full required settings validation, shared-reader denial, concurrent duplicate alerts, eligible/suppressed regression, opt-out, pending raw outbox suppression,1-day versus 30-day app isolation, exact purge confirmation, disabled capture prerequisites, no cross-app deletion and compressed-envelope expansion limits. A new test seed initially omitted required `has_events`; corrected and rerun successfully. No external delivery exists. Frontend implementation/real headless acceptance remains in progress.
+
+Latest privacy checks:270 unit tests passed. Added URL/short credential redaction; corrected an initial JWT-prefix regression and reran the entire unit suite. Soft-deleted app monitoring cleanup and expired raw-outbox cleanup are bounded independently of sink success. Integration coverage includes a forced alert insert failure proving receipt/quota/issue/outbox rollback before a successful retry.

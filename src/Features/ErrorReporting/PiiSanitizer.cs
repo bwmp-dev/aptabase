@@ -52,13 +52,23 @@ public partial class PiiSanitizer : IPiiSanitizer
     [GeneratedRegex(@"\b\d{3}-\d{2}-\d{4}\b", RegexOptions.Compiled)]
     private static partial Regex SsnRegex();
 
+    [GeneratedRegex(@"https?://[^\s'""<>]+", RegexOptions.IgnoreCase)]
+    private static partial Regex UrlRegex();
+
+    [GeneratedRegex(@"\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password)['""]?\s*[:=]\s*(['""]?)([^'""\s,;&]+)\1", RegexOptions.IgnoreCase)]
+    private static partial Regex CredentialValueRegex();
+
+    [GeneratedRegex(@"\b(?:Bearer|Basic)\s+([A-Za-z0-9+/=_.-]+)", RegexOptions.IgnoreCase)]
+    private static partial Regex AuthorizationValueRegex();
+
     public string Sanitize(string? text)
     {
         if (string.IsNullOrEmpty(text))
             return text ?? string.Empty;
 
         // Apply all sanitization patterns
-        var sanitized = text;
+        // URLs can encode identities/secrets in userinfo, paths, query strings and fragments.
+        var sanitized = UrlRegex().Replace(text, "[URL_REDACTED]");
 
         // Redact emails
         sanitized = EmailRegex().Replace(sanitized, "[EMAIL_REDACTED]");
@@ -88,6 +98,13 @@ public partial class PiiSanitizer : IPiiSanitizer
             // and re-append the captured closing quote so balanced quotes are preserved.
             var prefix = m.Value.Substring(0, m.Groups[2].Index - m.Index);
             return prefix + "[KEY_REDACTED]" + m.Groups[3].Value;
+        });
+
+        sanitized = AuthorizationValueRegex().Replace(sanitized, m => m.Value[..(m.Groups[1].Index - m.Index)] + "[KEY_REDACTED]");
+        sanitized = CredentialValueRegex().Replace(sanitized, m =>
+        {
+            var value = m.Groups[2];
+            return m.Value[..(value.Index - m.Index)] + "[KEY_REDACTED]" + m.Groups[1].Value;
         });
 
         // Redact UUIDs (be conservative - only if they appear in sensitive contexts)

@@ -53,7 +53,14 @@ public class PerformanceStore(IDbContext db, IPiiSanitizer sanitizer)
         var timestamp = body.Timestamp!.Value.ToUniversalTime();
         if (timestamp > DateTime.UtcNow) timestamp = DateTime.UtcNow;
         await using var connection = db.Connection;
-        return await connection.ExecuteScalarAsync<bool>(new CommandDefinition("""
+        await connection.OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var active = await connection.ExecuteScalarAsync<bool>(new CommandDefinition("""
+            SELECT true FROM apps a JOIN users u ON u.id=a.owner_id
+            WHERE a.id=@appId AND a.deleted_at IS NULL AND u.lock_reason IS NULL AND a.capture_performance FOR SHARE OF a
+            """, new { appId }, transaction, cancellationToken: cancellationToken));
+        if (!active) return false;
+        var accepted = await connection.ExecuteScalarAsync<bool>(new CommandDefinition("""
             WITH active AS (SELECT a.id FROM apps a JOIN users u ON u.id = a.owner_id
                 WHERE a.id = @appId AND a.deleted_at IS NULL AND u.lock_reason IS NULL),
             inserted AS (INSERT INTO app_transactions
@@ -64,7 +71,9 @@ public class PerformanceStore(IDbContext db, IPiiSanitizer sanitizer)
             """, new { appId, body.IsDebug, eventId = Guid.Parse(body.EventId!), timestamp,
                 name = sanitizer.Sanitize(body.Name), operation = sanitizer.Sanitize(body.Operation), body.DurationMs, body.Status,
                 release = sanitizer.Sanitize(body.Release), environment = sanitizer.Sanitize(body.Environment), platform = sanitizer.Sanitize(body.Platform),
-                spans = JsonSerializer.Serialize(spans, JsonOptions) }, cancellationToken: cancellationToken));
+                spans = JsonSerializer.Serialize(spans, JsonOptions) }, transaction, cancellationToken: cancellationToken));
+        await transaction.CommitAsync(cancellationToken);
+        return accepted;
     }
 
     public async Task<TransactionPage> List(PerformanceFilter filter, int offset, int limit, CancellationToken cancellationToken)
@@ -112,9 +121,9 @@ public class PerformanceStore(IDbContext db, IPiiSanitizer sanitizer)
         await using var connection = db.Connection;
         return await connection.ExecuteAsync(new CommandDefinition("""
             DELETE FROM app_transactions WHERE (app_id, is_debug, event_id) IN (
-                SELECT app_id, is_debug, event_id FROM app_transactions
-                WHERE received_at < CURRENT_TIMESTAMP - INTERVAL '30 days'
-                ORDER BY received_at LIMIT 10000 FOR UPDATE SKIP LOCKED)
+                SELECT t.app_id, t.is_debug, t.event_id FROM app_transactions t JOIN apps a ON a.id=t.app_id
+                WHERE t.received_at < CURRENT_TIMESTAMP - a.monitoring_retention_days * INTERVAL '1 day' OR a.deleted_at IS NOT NULL
+                ORDER BY t.received_at LIMIT 10000 FOR UPDATE OF t SKIP LOCKED)
             """, cancellationToken: cancellationToken));
     }
 }

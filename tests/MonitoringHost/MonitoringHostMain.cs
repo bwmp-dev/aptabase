@@ -9,6 +9,7 @@ using Aptabase.Features.Ingestion;
 using Aptabase.Features.Performance;
 using Aptabase.Features.Stats;
 using Aptabase.Features.Sentry;
+using Aptabase.Features.Monitoring;
 using Dapper;
 using FluentMigrator.Runner;
 using Microsoft.AspNetCore.Authentication;
@@ -127,7 +128,7 @@ public static class MonitoringHostMain
     {
         public void PopulateFeature(IEnumerable<ApplicationPart> parts, ControllerFeature feature)
         {
-            var allowed = new[] { typeof(ErrorsController), typeof(IssuesController), typeof(PerformanceController), typeof(ReleasesController), typeof(SentryController) };
+            var allowed = new[] { typeof(ErrorsController), typeof(IssuesController), typeof(PerformanceController), typeof(ReleasesController), typeof(SentryController), typeof(MonitoringController) };
             foreach (var controller in feature.Controllers.ToArray())
                 if (!allowed.Contains(controller.AsType())) feature.Controllers.Remove(controller);
         }
