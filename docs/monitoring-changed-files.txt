@@ -14,6 +14,7 @@ A	docs/monitoring-roadmap.md
 A	docs/native-symbols-api.md
 A	docs/sdk-native-assessment.md
 A	docs/sentry-compatibility.md
+A	docs/windows-monitoring-migration.md
 M	etc/clickhouse/queries/get_error_count__v1.liquid
 M	etc/clickhouse/queries/get_error_types__v1.liquid
 M	etc/clickhouse/queries/get_errors__v1.liquid
@@ -31,6 +32,7 @@ A	src/Data/Migrations/0019_ErrorOutbox.cs
 A	src/Data/Migrations/0020_SentryProjects.cs
 A	src/Data/Migrations/0021_MonitoringControls.cs
 A	src/Data/Migrations/0022_NativeSymbols.cs
+A	src/Data/Migrations/0023_EraseProcessedSymbolBytes.cs
 M	src/Features/ErrorReporting/Buffer/ErrorBackgroundWritter.cs
 A	src/Features/ErrorReporting/Buffer/ErrorOutbox.cs
 D	src/Features/ErrorReporting/Buffer/IErrorBuffer.cs
@@ -58,6 +60,7 @@ A	src/Features/Sentry/SentryEnvelope.cs
 A	src/Features/Sentry/SentryIngestionKey.cs
 A	src/Features/Symbolication/ElfSymbols.cs
 A	src/Features/Symbolication/NativeFrame.cs
+A	src/Features/Symbolication/NativeSourceOutput.cs
 A	src/Features/Symbolication/NativeSymbolProcessor.cs
 A	src/Features/Symbolication/NativeSymbolStore.cs
 A	src/Features/Symbolication/NativeSymbolsController.cs
@@ -118,6 +121,7 @@ A	src/webapp/features/releases/ReleasesPage.tsx
 A	src/webapp/features/releases/releases.ts
 A	src/webapp/fns/fetch-json.ts
 M	src/webapp/router.tsx
+M	tests/IntegrationTests/AppAccessTests.cs
 M	tests/IntegrationTests/Aptabase.IntegrationTests.csproj
 M	tests/IntegrationTests/Clients/MailCatcher.cs
 M	tests/IntegrationTests/CustomWebApplicationFactory.cs
@@ -130,9 +134,17 @@ A	tests/MonitoringHost/MonitoringHost.csproj
 A	tests/MonitoringHost/MonitoringHostMain.cs
 A	tests/NativeSymbolFaultWorker/NativeSymbolFaultWorker.csproj
 A	tests/NativeSymbolFaultWorker/Program.cs
+A	tests/SdkProbes/DotNetWindows/DotNetWindows.csproj
+A	tests/SdkProbes/DotNetWindows/Program.cs
+A	tests/SdkProbes/DotNetWindows/packages.lock.json
+A	tests/SdkProbes/DotNetWindows/run.ps1
 A	tests/SdkProbes/Java/Probe.java
 A	tests/SdkProbes/Java/pom.xml
 A	tests/SdkProbes/Java/run.ps1
+A	tests/SdkProbes/MauiWindowsCompile/CompileProbe.cs
+A	tests/SdkProbes/MauiWindowsCompile/MauiWindowsCompile.csproj
+A	tests/SdkProbes/MauiWindowsCompile/packages.lock.json
+A	tests/SdkProbes/Native/inline-probe.c
 A	tests/SdkProbes/Native/probe.c
 A	tests/SdkProbes/Native/run.ps1
 A	tests/SdkProbes/Node/fixture/thrower.ts
@@ -141,12 +153,17 @@ A	tests/SdkProbes/Node/package-lock.json
 A	tests/SdkProbes/Node/package.json
 A	tests/SdkProbes/Node/probe.cjs
 A	tests/SdkProbes/Node/run.ps1
+A	tests/SdkProbes/RustWindows/Cargo.lock
+A	tests/SdkProbes/RustWindows/Cargo.toml
+A	tests/SdkProbes/RustWindows/probe.rs
+A	tests/SdkProbes/RustWindows/run.ps1
 M	tests/UnitTests/Features/ErrorReporting/ErrorsControllerQuotaTests.cs
 A	tests/UnitTests/Features/ErrorReporting/IssueTests.cs
 M	tests/UnitTests/Features/ErrorReporting/PiiSanitizerTests.cs
 A	tests/UnitTests/Features/Performance/TransactionBodyTests.cs
 A	tests/UnitTests/Features/Sentry/ElfSymbolsTests.cs
 A	tests/UnitTests/Features/Sentry/NativeFrameTests.cs
+A	tests/UnitTests/Features/Sentry/NativeSourceOutputTests.cs
 A	tests/UnitTests/Features/Sentry/SentryEnvelopeTests.cs
 A	tests/UnitTests/Features/Sentry/SentryIngestionKeyTests.cs
 A	tools/NativeSymbolWorker/NativeSymbolWorker.csproj

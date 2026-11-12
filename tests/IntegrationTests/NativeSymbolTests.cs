@@ -105,9 +105,12 @@ public class NativeSymbolTests
             Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync(framesRoute.Replace(issue, new string('0', 64)))).StatusCode);
             Assert.Contains("unresolved", await http.GetStringAsync(framesRoute));
             Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync(framesRoute + "?buildMode=debug")).StatusCode);
-            processor.Index = new(build, new[] { new NativeFunction(0x1000, 16, "native_function") });
+            processor.Index = new(build, new[] { new NativeFunction(0x1000, 16, "native_function") },
+                new[] { new NativeSourceAddress(0x1004, new[] { new NativeSourceLocation("inline_child", "probe.c", 2), new NativeSourceLocation("native_function", "probe.c", 5) }) }, "available");
             Assert.True(await store.ProcessOne(default)); Assert.False(await store.ProcessOne(default));
             Assert.Contains("native_function", await http.GetStringAsync(framesRoute));
+            Assert.Contains("inline_child", await http.GetStringAsync(framesRoute));
+            Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT octet_length(content) FROM native_symbols WHERE id=@id", new { id }));
             Assert.True((await app.Services.GetRequiredService<IIssueStore>().Events("a", false, issue, 0, 10, default)).Events.Single().HasNativeFrames);
             // The same build ID in another app or mode must never supply this report's symbols.
             await connection.ExecuteAsync("UPDATE native_symbols SET is_debug=true WHERE id=@id", new { id });

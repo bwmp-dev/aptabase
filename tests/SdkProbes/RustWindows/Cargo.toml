@@ -1,0 +1,12 @@
+[package]
+name = "aptabase-rust-panic-probe"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+serde_json = "=1.0.154"
+
+[[bin]]
+name = "panic-probe"
+path = "probe.rs"

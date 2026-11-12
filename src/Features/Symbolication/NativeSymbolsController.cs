@@ -45,7 +45,7 @@ public class NativeSymbolsController(NativeSymbolStore store, IIssueStore issues
         if (!(await issues.GetAccess(appId, HttpContext.GetCurrentUserIdentity(), ct)).CanRead) return StatusCode(403);
         if (!Mode(buildMode)) return BadRequest();
         var frames = await store.Resolve(appId, buildMode == "debug", issueId, eventId, ct);
-        return frames is null ? NotFound() : Ok(new { capability = "function-only", frames });
+        return frames is null ? NotFound() : Ok(new { capability = "function-and-source", frames });
     }
     private static bool Mode(string mode) => mode is "release" or "debug";
 }

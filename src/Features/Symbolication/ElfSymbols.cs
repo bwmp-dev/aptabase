@@ -4,7 +4,9 @@ using System.Text;
 namespace Aptabase.Features.Symbolication;
 
 public record NativeFunction(ulong Address, ulong Size, string Name);
-public record NativeSymbolIndex(string BuildId, NativeFunction[] Functions)
+public record NativeSourceLocation(string Function, string File, int Line);
+public record NativeSourceAddress(ulong Address, NativeSourceLocation[] Locations);
+public record NativeSymbolIndex(string BuildId, NativeFunction[] Functions, NativeSourceAddress[]? Sources = null, string SourceStatus = "unconfigured")
 {
     public NativeFunction? Resolve(ulong address) => Functions.FirstOrDefault(f => address >= f.Address && address - f.Address < f.Size);
 }

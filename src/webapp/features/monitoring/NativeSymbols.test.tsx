@@ -150,7 +150,11 @@ describe("Native symbols listing", () => {
 
     expect(section.textContent).toContain("Each file can be up to 8 MiB. An app can keep 8 files and 32 MiB in total");
     expect(section.textContent).toContain("kept for 14 days");
-    expect(section.textContent).toContain("Only function names and address ranges are read");
+    expect(section.textContent).toContain("Function names and address ranges are always read");
+    expect(section.textContent).toContain("file names (without folders), line numbers and inlined calls are kept too");
+    expect(section.textContent).toContain("Source code and columns are never read or stored");
+    expect(section.textContent).toContain("The uploaded file is erased once it has been processed and can't be downloaded");
+    expect(section.textContent).toContain("need to be deleted and uploaded again to add them");
     expect(section.textContent).toContain("Expanded occurrences that include native frames show the resolved function names");
     expect(section.textContent).toContain("leaves those frames unresolved; the error reports themselves are kept");
     expect(within(section).queryByRole("link")).toBeNull();

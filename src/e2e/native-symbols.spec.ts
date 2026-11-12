@@ -1,10 +1,13 @@
 import type { Locator, Page } from "@playwright/test";
 import {
+  INLINE_BUILD_ID,
+  INLINE_FUNCTION,
   NATIVE_EVENT_ID,
   PROBE_BUILD_ID,
   PROBE_FUNCTION,
   expect,
   expectNoHorizontalOverflow,
+  readyInlineArtifact,
   readyProbeArtifact,
   snapshot,
   test,
@@ -38,6 +41,11 @@ async function expandNativeOccurrence(page: Page): Promise<Locator> {
   return native.getByRole("region", { name: "Native frames" });
 }
 
+// Frame rows only: resolved frames can contain a nested list of inlined calls.
+function frameRows(frames: Locator) {
+  return frames.getByRole("list", { name: "Stack frames" }).locator(":scope > li");
+}
+
 function purgeCount(page: Page) {
   return page
     .getByRole("region", { name: "Clear monitoring data" })
@@ -48,12 +56,12 @@ function purgeCount(page: Page) {
 test.describe("Native symbols and native frames with fixture API", () => {
   test("owner uploads symbols, sees validation finish, and deletes them", async ({ page, api }) => {
     const section = await openSymbolsSettings(page);
-    await expect(section).toContainText("Only function names and address ranges are read");
+    await expect(section).toContainText("Source code and columns are never read or stored");
     await expect(section.getByText("No symbol files uploaded for release builds.")).toBeVisible();
     await expect(purgeCount(page)).toHaveText("0");
 
     const bytes = elfHeader();
-    await section.getByLabel("release symbol file").setInputFiles({ name: "libprobe.so", mimeType: "application/x-sharedlib", buffer: bytes });
+    await section.getByLabel("release symbol file", { exact: true }).setInputFiles({ name: "libprobe.so", mimeType: "application/x-sharedlib", buffer: bytes });
     await expect(section.getByRole("status")).toHaveText("Upload received. It will be validated before it can be used.");
     const row = section.getByRole("listitem").first();
     await expect(row).toContainText("Pending validation");
@@ -100,16 +108,19 @@ test.describe("Native symbols and native frames with fixture API", () => {
     expect(api.requests.some((r) => r.method === "POST")).toBe(false);
   });
 
-  test("occurrence shows function-only frames, then unresolved after the owner deletes symbols", async ({ page, api }) => {
+  test("occurrence shows frames with source locations, then unresolved after the owner deletes symbols", async ({ page, api }) => {
     api.nativeSymbols.release = [readyProbeArtifact()];
     const frames = await expandNativeOccurrence(page);
 
-    await expect(frames).toContainText("Function names only: no file names, line numbers or inlined frames.");
-    const rows = frames.getByRole("listitem");
-    await expect(rows).toHaveCount(2);
-    await expect(rows.nth(0)).toContainText(`${PROBE_FUNCTION} +0x4`);
-    await expect(rows.nth(0)).toContainText(`0x2e0 in build ${PROBE_BUILD_ID}`);
-    await expect(rows.nth(1)).toContainText("Unresolved");
+    await expect(frames).toContainText("plus file names, line numbers and inlined calls when the symbol file has line information");
+    const rows = frameRows(frames);
+    await expect(rows).toHaveCount(3);
+    await expect(rows.nth(0)).toContainText("Unresolved");
+    await expect(rows.nth(0)).toContainText(`0x2d4 in build ${INLINE_BUILD_ID}`);
+    await expect(rows.nth(1)).toContainText(`${PROBE_FUNCTION} +0x4`);
+    await expect(rows.nth(1)).toContainText("probe.c:3");
+    await expect(rows.nth(1)).toContainText(`0x2e0 in build ${PROBE_BUILD_ID}`);
+    await expect(rows.nth(2)).toContainText("Unresolved");
     await expectNoHorizontalOverflow(page);
     await frames.scrollIntoViewIfNeeded();
     await snapshot(page, "native-frames");
@@ -123,18 +134,75 @@ test.describe("Native symbols and native frames with fixture API", () => {
     await expect(section.getByRole("status")).toHaveText(`Deleted build ID ${PROBE_BUILD_ID}.`);
 
     const unresolved = await expandNativeOccurrence(page);
-    await expect(unresolved.getByRole("listitem")).toHaveCount(2);
-    await expect(unresolved.getByRole("listitem").nth(0)).toContainText("Unresolved");
-    await expect(unresolved.getByRole("listitem").nth(0)).toContainText(`0x2e0 in build ${PROBE_BUILD_ID}`);
+    await expect(frameRows(unresolved)).toHaveCount(3);
+    await expect(frameRows(unresolved).nth(1)).toContainText("Unresolved");
+    await expect(frameRows(unresolved).nth(1)).toContainText(`0x2e0 in build ${PROBE_BUILD_ID}`);
     await expect(unresolved).not.toContainText(PROBE_FUNCTION);
+    await expect(unresolved).not.toContainText("probe.c");
+  });
+
+  test("inline chains read innermost first, wrap at phone width, and fall back when source is missing", async ({ page, api }) => {
+    api.nativeSymbols.release = [readyProbeArtifact(), readyInlineArtifact()];
+    const frames = await expandNativeOccurrence(page);
+
+    const inline = frameRows(frames).nth(0);
+    await expect(inline).toContainText(`${INLINE_FUNCTION} +0x0`);
+    await expect(inline).toContainText("Inlined calls, innermost first:");
+    await expect(inline.getByRole("list", { name: "Inlined calls" }).getByRole("listitem")).toHaveText([
+      "native_leaf inline-probe.c:2 (inlined)",
+      "native_middle inline-probe.c:5 (inlined)",
+      `${INLINE_FUNCTION} inline-probe.c:8`,
+    ]);
+    await expect(inline).toContainText(`0x2d4 in build ${INLINE_BUILD_ID}`);
+    await expectNoHorizontalOverflow(page);
+    const box = await inline.boundingBox();
+    expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    await inline.scrollIntoViewIfNeeded();
+    await snapshot(page, "native-inline");
+
+    // Collapsing and expanding re-reads the frames, so a server without source locations shows the fallback.
+    api.sourceStatus = "unconfigured";
+    const summary = page.getByRole("dialog").locator("details").filter({ hasText: "Linux 6.8" }).locator("summary");
+    await summary.click();
+    await summary.click();
+    await expect(frameRows(frames).nth(0)).toContainText("No source location: source locations aren't enabled on this server.");
+    await expect(frameRows(frames).nth(0)).toContainText(`${INLINE_FUNCTION} +0x0`);
+    await expect(frames.getByRole("list", { name: "Inlined calls" })).toHaveCount(0);
+
+    api.sourceStatus = "unavailable";
+    await summary.click();
+    await summary.click();
+    await expect(frameRows(frames).nth(1)).toContainText("No source location: the symbol file has no line information for this address.");
+    await expect(frames).not.toContainText("inline-probe.c");
+  });
+
+  test("a shorter retention expires older symbols and their frames fall back to unresolved", async ({ page, api }) => {
+    api.nativeSymbols.release = [readyProbeArtifact(), readyInlineArtifact()];
+    const section = await openSymbolsSettings(page);
+    await expect(section.getByRole("button", { name: `Delete build ID ${INLINE_BUILD_ID}` })).toBeVisible();
+    await expect(purgeCount(page)).toHaveText("2");
+
+    await page.getByLabel("Retention (days)").fill("3");
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Settings saved." })).toBeVisible();
+    await expect(section.getByRole("button", { name: `Delete build ID ${INLINE_BUILD_ID}` })).toHaveCount(0);
+    await expect(section.getByRole("button", { name: `Delete build ID ${PROBE_BUILD_ID}` })).toBeVisible();
+    await expect(section).toContainText("kept for 3 days after upload");
+    await expect(purgeCount(page)).toHaveText("1");
+
+    const frames = await expandNativeOccurrence(page);
+    await expect(frameRows(frames).nth(0)).toContainText("Unresolved");
+    await expect(frameRows(frames).nth(0)).not.toContainText("inline-probe.c");
+    await expect(frameRows(frames).nth(1)).toContainText("probe.c:3");
   });
 
   test("shared readers see resolved frames but never request symbol controls", async ({ page, api }) => {
     api.canManage = false;
-    api.nativeSymbols.release = [readyProbeArtifact()];
+    api.nativeSymbols.release = [readyProbeArtifact(), readyInlineArtifact()];
 
     const frames = await expandNativeOccurrence(page);
-    await expect(frames.getByRole("listitem").nth(0)).toContainText(`${PROBE_FUNCTION} +0x4`);
+    await expect(frameRows(frames).nth(1)).toContainText(`${PROBE_FUNCTION} +0x4`);
+    await expect(frameRows(frames).nth(0).getByRole("list", { name: "Inlined calls" }).getByRole("listitem")).toHaveCount(3);
 
     expect(api.requests.some((r) => r.url.pathname.includes("/native-symbols") || r.url.pathname.includes("/monitoring/"))).toBe(false);
   });

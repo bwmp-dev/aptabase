@@ -20,11 +20,13 @@ public class NativeSymbolWorkerTests
         var image = Required("NATIVE_SYMBOL_TEST_IMAGE");
         var originalDirectory = Environment.GetEnvironmentVariable("NATIVE_SYMBOL_WORKER_DIRECTORY");
         var originalImage = Environment.GetEnvironmentVariable("NATIVE_SYMBOL_WORKER_IMAGE");
+        var originalSource = Environment.GetEnvironmentVariable("NATIVE_SOURCE_WORKER_IMAGE");
         var before = Directory.GetDirectories(Path.GetTempPath(), "aptabase-symbol-*").ToHashSet();
         try
         {
             Environment.SetEnvironmentVariable("NATIVE_SYMBOL_WORKER_DIRECTORY", worker);
             Environment.SetEnvironmentVariable("NATIVE_SYMBOL_WORKER_IMAGE", image);
+            Environment.SetEnvironmentVariable("NATIVE_SOURCE_WORKER_IMAGE", null);
             var processor = new NativeSymbolProcessor();
             Assert.True(processor.Enabled);
             var bytes = await File.ReadAllBytesAsync(fixture);
@@ -35,6 +37,24 @@ public class NativeSymbolWorkerTests
             Assert.Equal(expected.Functions, result.Functions);
             Assert.Null(await processor.Process(new byte[64], default));
             Assert.Null(await processor.Process(new byte[ElfSymbols.MaxBytes + 1], default));
+
+            Environment.SetEnvironmentVariable("NATIVE_SOURCE_WORKER_IMAGE", Required("NATIVE_SYMBOL_TEST_SOURCE_IMAGE"));
+            processor = new NativeSymbolProcessor();
+            var inlineBytes = await File.ReadAllBytesAsync(Required("NATIVE_SYMBOL_TEST_INLINE_FIXTURE"));
+            var inline = await processor.Process(inlineBytes, default);
+            Assert.NotNull(inline);
+            Assert.Equal("available", inline.SourceStatus);
+            var chain = inline.Sources!.First(s => s.Locations.Length == 3).Locations;
+            Assert.Equal(new[] { "native_leaf", "native_middle", "aptabase_inline_probe" }, chain.Select(l => l.Function));
+            Assert.Equal(new[] { 2, 5, 8 }, chain.Select(l => l.Line));
+            Assert.All(chain, l => Assert.Equal("inline-probe.c", l.File));
+            // An unavailable configured image never removes a valid function index or fetches an image.
+            Environment.SetEnvironmentVariable("NATIVE_SOURCE_WORKER_IMAGE", "sha256:" + new string('0', 64));
+            var fallback = await new NativeSymbolProcessor().Process(bytes, default);
+            Assert.NotNull(fallback);
+            Assert.Equal("unavailable", fallback.SourceStatus);
+            Assert.Null(fallback.Sources);
+            Environment.SetEnvironmentVariable("NATIVE_SOURCE_WORKER_IMAGE", null);
 
             Environment.SetEnvironmentVariable("NATIVE_SYMBOL_WORKER_DIRECTORY", faultWorker);
             processor = new NativeSymbolProcessor();
@@ -64,6 +84,7 @@ public class NativeSymbolWorkerTests
         {
             Environment.SetEnvironmentVariable("NATIVE_SYMBOL_WORKER_DIRECTORY", originalDirectory);
             Environment.SetEnvironmentVariable("NATIVE_SYMBOL_WORKER_IMAGE", originalImage);
+            Environment.SetEnvironmentVariable("NATIVE_SOURCE_WORKER_IMAGE", originalSource);
         }
     }
 
@@ -75,7 +96,7 @@ public class NativeSymbolWorkerFactAttribute : FactAttribute
 {
     public NativeSymbolWorkerFactAttribute()
     {
-        if (new[] { "NATIVE_SYMBOL_TEST_WORKER_DIRECTORY", "NATIVE_SYMBOL_TEST_FAULT_DIRECTORY", "NATIVE_SYMBOL_TEST_FIXTURE", "NATIVE_SYMBOL_TEST_IMAGE" }
+        if (new[] { "NATIVE_SYMBOL_TEST_WORKER_DIRECTORY", "NATIVE_SYMBOL_TEST_FAULT_DIRECTORY", "NATIVE_SYMBOL_TEST_FIXTURE", "NATIVE_SYMBOL_TEST_IMAGE", "NATIVE_SYMBOL_TEST_SOURCE_IMAGE", "NATIVE_SYMBOL_TEST_INLINE_FIXTURE" }
             .Any(name => string.IsNullOrEmpty(Environment.GetEnvironmentVariable(name))))
             Skip = "Explicit local Docker image, published workers and NDK ELF fixture required; see docs/native-symbols-api.md";
     }

@@ -44,6 +44,13 @@ export interface IssueEvent {
 }
 
 export type NativeFrameStatus = "resolved" | "unresolved" | "ambiguous";
+export type NativeSourceStatus = "available" | "unavailable" | "unconfigured" | "limit_exceeded";
+
+export interface NativeSourceLocation {
+  function: string;
+  file: string;
+  line: number;
+}
 
 export interface NativeFrame {
   buildId: string;
@@ -51,10 +58,13 @@ export interface NativeFrame {
   status: NativeFrameStatus;
   function: string | null;
   offset: number | null;
+  sourceStatus: NativeSourceStatus;
+  // Deepest inlined callee first, the outer call site last.
+  locations: NativeSourceLocation[];
 }
 
 export interface NativeFramesResponse {
-  capability: "function-only";
+  capability: "function-only" | "function-and-source";
   frames: NativeFrame[];
 }
 

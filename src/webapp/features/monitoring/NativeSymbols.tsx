@@ -136,17 +136,21 @@ export function NativeSymbols({ appId, retentionDays }: { appId: string; retenti
       <div className="text-sm text-muted-foreground space-y-2 max-w-2xl">
         <p>
           Upload unstripped ARM64 native libraries so native text crash reports can be matched to function names. Only
-          64-bit little-endian ARM64 ELF shared libraries (<code>.so</code>) with a GNU build ID are supported. Only
-          function names and address ranges are read: no file names, line numbers, inlined frames or source code.
+          64-bit little-endian ARM64 ELF shared libraries (<code>.so</code>) with a GNU build ID are supported.
+          Function names and address ranges are always read. When the library has line information and this server has
+          source locations enabled, file names (without folders), line numbers and inlined calls are kept too. Source
+          code and columns are never read or stored.
         </p>
         <p>
           Apple dSYMs, Windows PDBs, Breakpad symbols, source maps, archives and crash dumps are not accepted. Expanded
-          occurrences that include native frames show the resolved function names. Deleting a file, or letting it
-          expire, leaves those frames unresolved; the error reports themselves are kept.
+          occurrences that include native frames show the resolved function names and any source locations. Deleting a
+          file, or letting it expire, leaves those frames unresolved; the error reports themselves are kept. Files
+          uploaded before source locations were enabled need to be deleted and uploaded again to add them.
         </p>
         <p>
-          Files are kept for {retentionDays} {retentionDays === 1 ? "day" : "days"} after upload, following the
-          monitoring retention setting, and can't be downloaded. Clearing monitoring data also deletes them.
+          The uploaded file is erased once it has been processed and can't be downloaded. The extracted function and
+          location data is kept for {retentionDays} {retentionDays === 1 ? "day" : "days"} after upload, following the
+          monitoring retention setting. Clearing monitoring data also deletes it.
         </p>
       </div>
       <SegmentedControl label="Build mode" options={buildModeOptions} value={buildMode} onChange={setBuildMode} />

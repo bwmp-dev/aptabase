@@ -23,4 +23,12 @@ try {
     }
     Write-Output 'PASS: offline Android ARM64 DWARF function/source-line resolution. No device, crash dump, server, or artifact upload tested.'
     Write-Output "Synthetic ELF upload fixture emitted at bin/probe.so; GNU build ID $buildId. Use its actual build ID and ELF address, not a fixed release label."
+    & (Join-Path $toolBin 'clang.exe') --target=aarch64-linux-android28 -g -O2 '-fdebug-compilation-dir=.' -nostdlib -shared '-Wl,--build-id=sha1' inline-probe.c -o bin/inline-probe.so
+    if ($LASTEXITCODE -ne 0) { throw 'Inline fixture compile failed.' }
+    $inline = & (Join-Path $toolBin 'llvm-symbolizer.exe') --obj=bin/inline-probe.so --inlines 0x2d4
+    if ($LASTEXITCODE -ne 0 -or ($inline -join "`n") -notmatch '(?s)native_leaf.*inline-probe.c:2:.*native_middle.*inline-probe.c:5:.*aptabase_inline_probe.*inline-probe.c:8:') { throw 'Inline fixture source chain changed; inspect fixture addresses before acceptance.' }
+    $inlineNotes = & (Join-Path $toolBin 'llvm-readelf.exe') -n bin/inline-probe.so
+    if ($LASTEXITCODE -ne 0 -or ($inlineNotes -join "`n") -notmatch 'Build ID: ([a-f0-9]{40})') { throw 'Inline fixture build ID missing.' }
+    @{ probe = @{ buildId = $buildId; sha256 = (Get-FileHash bin/probe.so -Algorithm SHA256).Hash.ToLowerInvariant() }; inline = @{ buildId = $Matches[1]; sha256 = (Get-FileHash bin/inline-probe.so -Algorithm SHA256).Hash.ToLowerInvariant() } } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath bin/fixtures.json -Encoding ascii
+    Write-Output 'PASS: synthetic inline fixture at 0x2d4 has native_leaf:2 -> native_middle:5 -> aptabase_inline_probe:8. ARM64 code was not executed.'
 } finally { Pop-Location }

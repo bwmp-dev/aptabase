@@ -500,15 +500,21 @@ describe("IssuesPanel native frames", () => {
   const BUILD_ID = "bbe2c0d49e25325c5e51f939ec1eac37cc159800";
   const OTHER_BUILD_ID = "0123456789abcdef0123456789abcdef01234567";
   const NATIVE_EVENT_ID = "7d0d1f5e-7c1e-4c31-9a39-62b3f6f0c0aa";
+  const INLINE_BUILD_ID = "8c932eb449cfe39353e51fa362a4b63621a499e4";
+  const noSource = { sourceStatus: "unconfigured" as const, locations: [] };
 
   const frames: NativeFramesResponse = {
     capability: "function-only",
     frames: [
-      { buildId: BUILD_ID, address: "0x2e0", status: "resolved", function: "aptabase_symbol_probe", offset: 4 },
-      { buildId: OTHER_BUILD_ID, address: "0x1a40", status: "unresolved", function: null, offset: null },
-      { buildId: BUILD_ID, address: "0x9000", status: "ambiguous", function: null, offset: null },
+      { buildId: BUILD_ID, address: "0x2e0", status: "resolved", function: "aptabase_symbol_probe", offset: 4, ...noSource },
+      { buildId: OTHER_BUILD_ID, address: "0x1a40", status: "unresolved", function: null, offset: null, ...noSource },
+      { buildId: BUILD_ID, address: "0x9000", status: "ambiguous", function: null, offset: null, ...noSource },
     ],
   };
+
+  function frameRows(section: HTMLElement) {
+    return Array.from(section.querySelectorAll<HTMLElement>("ol[aria-label='Stack frames'] > li"));
+  }
 
   function nativeFrameRequests() {
     return calls().filter((c) => c.url.pathname.endsWith("/native-frames"));
@@ -551,8 +557,9 @@ describe("IssuesPanel native frames", () => {
 
     toggle(details[0], true);
     const section = await within(details[0]).findByRole("region", { name: "Native frames" });
+    await within(section).findAllByRole("listitem");
     expect(section.textContent).toContain("Function names only: no file names, line numbers or inlined frames.");
-    const rows = await within(section).findAllByRole("listitem");
+    const rows = frameRows(section);
     expect(rows).toHaveLength(3);
     expect(rows[0].textContent).toContain("aptabase_symbol_probe +0x4");
     expect(rows[0].textContent).toContain(`0x2e0 in build ${BUILD_ID}`);
@@ -625,4 +632,80 @@ describe("IssuesPanel native frames", () => {
     fireEvent.click(retry);
     expect(await within(details[0]).findByText("aptabase_symbol_probe")).toBeTruthy();
   }, 10_000);
+
+  it("shows source locations with the inline chain innermost first, and explains missing ones", async () => {
+    const leaf = { function: "native_leaf", file: "inline-probe.c", line: 2 };
+    const middle = { function: "native_middle", file: "inline-probe.c", line: 5 };
+    const outer = { function: "aptabase_inline_probe", file: "inline-probe.c", line: 8 };
+    nativeFramesHandler = () => ({
+      status: 200,
+      body: {
+        capability: "function-and-source",
+        frames: [
+          { buildId: INLINE_BUILD_ID, address: "0x2d4", status: "resolved", function: "aptabase_inline_probe", offset: 0, sourceStatus: "available", locations: [leaf, middle, outer] },
+          { buildId: BUILD_ID, address: "0x2e0", status: "resolved", function: "aptabase_symbol_probe", offset: 4, sourceStatus: "available", locations: [{ function: "aptabase_symbol_probe", file: "probe.c", line: 3 }] },
+          { buildId: BUILD_ID, address: "0x2e4", status: "resolved", function: "aptabase_symbol_probe", offset: 8, sourceStatus: "unavailable", locations: [] },
+          { buildId: BUILD_ID, address: "0x2e8", status: "resolved", function: "aptabase_symbol_probe", offset: 12, sourceStatus: "limit_exceeded", locations: [] },
+          { buildId: BUILD_ID, address: "0x2ec", status: "resolved", function: "aptabase_symbol_probe", offset: 16, sourceStatus: "unconfigured", locations: [] },
+          { buildId: OTHER_BUILD_ID, address: "0x1a40", status: "unresolved", function: null, offset: null, sourceStatus: "unavailable", locations: [] },
+        ],
+      } satisfies NativeFramesResponse,
+    });
+    const { details } = await openOccurrences();
+    toggle(details[0], true);
+
+    const section = await within(details[0]).findByRole("region", { name: "Native frames" });
+    await within(section).findAllByRole("listitem");
+    expect(section.textContent).toContain(
+      "Function names, plus file names, line numbers and inlined calls when the symbol file has line information. No source code or columns."
+    );
+    expect(section.textContent).not.toContain("Function names only");
+    const rows = frameRows(section);
+    expect(rows).toHaveLength(6);
+
+    expect(rows[0].textContent).toContain("aptabase_inline_probe +0x0");
+    expect(rows[0].textContent).toContain("Inlined calls, innermost first:");
+    const chain = within(rows[0]).getAllByRole("listitem").map((item) => item.textContent);
+    expect(chain).toEqual([
+      "native_leaf inline-probe.c:2 (inlined)",
+      "native_middle inline-probe.c:5 (inlined)",
+      "aptabase_inline_probe inline-probe.c:8",
+    ]);
+    expect(rows[0].textContent).toContain(`0x2d4 in build ${INLINE_BUILD_ID}`);
+
+    expect(within(rows[1]).queryByRole("list")).toBeNull();
+    expect(rows[1].textContent).toContain("probe.c:3");
+    expect(rows[1].textContent).not.toContain("inlined");
+    expect(rows[2].textContent).toContain("No source location: the symbol file has no line information for this address.");
+    expect(rows[3].textContent).toContain("No source location: the symbol file exceeded the source-location processing limits.");
+    expect(rows[4].textContent).toContain("No source location: source locations aren't enabled on this server.");
+    expect(rows[2].textContent).toContain("aptabase_symbol_probe +0x8");
+    expect(rows[5].textContent).toContain("Unresolved");
+    expect(rows[5].textContent).not.toContain("No source location");
+    expect(rows[5].textContent).toContain(`0x1a40 in build ${OTHER_BUILD_ID}`);
+  });
+
+  it("keeps an unresolved fallback with no locations once symbols are gone", async () => {
+    let current: NativeFramesResponse = {
+      capability: "function-and-source",
+      frames: [
+        { buildId: INLINE_BUILD_ID, address: "0x2d4", status: "resolved", function: "aptabase_inline_probe", offset: 0, sourceStatus: "available", locations: [{ function: "native_leaf", file: "inline-probe.c", line: 2 }, { function: "aptabase_inline_probe", file: "inline-probe.c", line: 8 }] },
+      ],
+    };
+    nativeFramesHandler = () => ({ status: 200, body: current });
+    const { details } = await openOccurrences();
+    toggle(details[0], true);
+    expect(await within(details[0]).findByText("native_leaf")).toBeTruthy();
+
+    current = {
+      ...current,
+      frames: [{ ...current.frames[0], status: "unresolved", function: null, offset: null, sourceStatus: "unavailable", locations: [] }],
+    };
+    toggle(details[0], false);
+    toggle(details[0], true);
+    await waitFor(() => expect(within(details[0]).queryByText("native_leaf")).toBeNull());
+    expect(within(details[0]).getByText("Unresolved")).toBeTruthy();
+    expect(details[0].textContent).toContain(`0x2d4 in build ${INLINE_BUILD_ID}`);
+    expect(details[0].textContent).not.toContain("inline-probe.c");
+  });
 });

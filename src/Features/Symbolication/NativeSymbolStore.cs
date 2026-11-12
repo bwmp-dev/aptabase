@@ -69,7 +69,7 @@ public class NativeSymbolStore(IDbContext db, INativeSymbolProcessor processor, 
         var job = await connection.QuerySingleOrDefaultAsync<(Guid Id, byte[] Content)?>(new CommandDefinition($"SELECT s.id,s.content FROM native_symbols s JOIN apps a ON a.id=s.app_id WHERE s.status='pending' AND {Active} ORDER BY s.created_at LIMIT 1 FOR UPDATE OF s SKIP LOCKED", transaction: transaction, cancellationToken: ct));
         if (job is null) return false;
         var index = await processor.Process(job.Value.Content, ct);
-        await connection.ExecuteAsync(new CommandDefinition("UPDATE native_symbols SET status=@status,build_id=@buildId,symbol_index=CAST(@index AS jsonb),content=CASE WHEN @status='invalid' THEN ''::bytea ELSE content END WHERE id=@id",
+        await connection.ExecuteAsync(new CommandDefinition("UPDATE native_symbols SET status=@status,build_id=@buildId,symbol_index=CAST(@index AS jsonb),content=''::bytea WHERE id=@id",
             new { id = job.Value.Id, status = index is null ? "invalid" : "ready", buildId = index?.BuildId, index = index is null ? null : JsonSerializer.Serialize(index) }, transaction, cancellationToken: ct));
         await transaction.CommitAsync(ct); return true;
     }
@@ -96,7 +96,9 @@ public class NativeSymbolStore(IDbContext db, INativeSymbolProcessor processor, 
                 frame.Address,
                 status = matches?.Length > 1 ? "ambiguous" : function is null ? "unresolved" : "resolved",
                 function = function is null ? null : sanitizer.SanitizeLabel(function.Name, 512),
-                offset = function is null ? (ulong?)null : frame.Offset - function.Address
+                offset = function is null ? (ulong?)null : frame.Offset - function.Address,
+                sourceStatus = function is null ? "unavailable" : matches![0].Sources?.Any(s => s.Address == frame.Offset) == true ? "available" : matches![0].SourceStatus == "available" ? "unavailable" : matches[0].SourceStatus,
+                locations = function is null ? Array.Empty<NativeSourceLocation>() : matches![0].Sources?.FirstOrDefault(s => s.Address == frame.Offset)?.Locations ?? Array.Empty<NativeSourceLocation>()
             };
         }).ToArray();
     }

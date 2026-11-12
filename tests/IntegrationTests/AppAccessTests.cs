@@ -1,6 +1,9 @@
 using System.Net;
 using Xunit;
 using AwesomeAssertions;
+using Aptabase.Data;
+using Dapper;
+using System.Text.Json;
 
 namespace Aptabase.IntegrationTests;
 
@@ -53,6 +56,44 @@ public class AppAccessTests
         var response = await _fixture.UserA.Get($"/api/_stats/metrics?buildMode=release&appId={app.Id}&startDate=2026-01-01&endDate=2026-02-01");
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task Existing_Aptabase_Login_Covers_Analytics_And_Monitoring_With_Shared_App_Permissions()
+    {
+        var app = await _fixture.UserA.CreateApp(Guid.NewGuid().ToString());
+        var readRoutes = new[] {
+            $"/api/_stats/metrics?buildMode=release&appId={app.Id}&startDate=2026-01-01&endDate=2026-02-01",
+            $"/api/v0/apps/{app.Id}/errors", $"/api/v0/apps/{app.Id}/issues",
+            $"/api/v0/apps/{app.Id}/transactions", $"/api/v0/apps/{app.Id}/performance/summary",
+            $"/api/v0/apps/{app.Id}/releases"
+        };
+        var ownerRoutes = new[] {
+            $"/api/v0/apps/{app.Id}/monitoring/settings", $"/api/v0/apps/{app.Id}/monitoring/data",
+            $"/api/v0/apps/{app.Id}/monitoring/alerts", $"/api/v0/apps/{app.Id}/sentry-projects",
+            $"/api/v0/apps/{app.Id}/native-symbols"
+        };
+        using var anonymous = _fixture.CreateClient();
+        anonymous.DefaultRequestHeaders.Add("App-Key", app.AppKey);
+        foreach (var route in readRoutes.Concat(ownerRoutes))
+        {
+            (await _fixture.UserA.Get(route)).StatusCode.Should().Be(HttpStatusCode.OK, route);
+            (await _fixture.UserB.Get(route)).StatusCode.Should().Be(HttpStatusCode.Forbidden, route);
+            (await anonymous.GetAsync(route)).StatusCode.Should().Be(HttpStatusCode.Unauthorized, route);
+        }
+        using var identity = JsonDocument.Parse(await (await _fixture.UserB.Get("/api/_auth/me")).Content.ReadAsStringAsync());
+        await using var db = _fixture.GetService<IDbContext>().Connection;
+        await db.ExecuteAsync("INSERT INTO app_shares (app_id,email) VALUES (@appId,@email)",
+            new { appId = app.Id, email = identity.RootElement.GetProperty("email").GetString() });
+        try
+        {
+            foreach (var route in readRoutes)
+                (await _fixture.UserB.Get(route)).StatusCode.Should().Be(HttpStatusCode.OK, route);
+            foreach (var route in ownerRoutes)
+                (await _fixture.UserB.Get(route)).StatusCode.Should().Be(HttpStatusCode.Forbidden, route);
+        }
+        finally { await db.ExecuteAsync("DELETE FROM app_shares WHERE app_id=@appId", new { appId = app.Id }); }
+        (await _fixture.UserB.Get(readRoutes[2])).StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
     [Theory, MemberData(nameof(AllStatsEndpoints))]

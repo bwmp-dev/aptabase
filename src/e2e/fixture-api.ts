@@ -123,11 +123,36 @@ const sampleEvents = [
   },
 ];
 
-// Sample synthetic values matching the NDK probe library used by the real-host checks.
+// Sample synthetic values matching the NDK probe libraries used by the real-host checks.
 export const PROBE_BUILD_ID = "bbe2c0d49e25325c5e51f939ec1eac37cc159800";
 export const PROBE_FUNCTION = "aptabase_symbol_probe";
-const PROBE_FUNCTION_START = 0x2dc;
-const PROBE_FUNCTION_SIZE = 24;
+export const INLINE_BUILD_ID = "8c932eb449cfe39353e51fa362a4b63621a499e4";
+export const INLINE_FUNCTION = "aptabase_inline_probe";
+type SourceStatus = "available" | "unavailable" | "unconfigured" | "limit_exceeded";
+const FIXTURE_NOW = Date.parse("2026-11-11T15:00:00Z");
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const sampleFunctions: Record<string, { name: string; start: number; size: number; locations: (address: number) => { function: string; file: string; line: number }[] }> = {
+  [PROBE_BUILD_ID]: {
+    name: PROBE_FUNCTION,
+    start: 0x2dc,
+    size: 24,
+    locations: () => [{ function: PROBE_FUNCTION, file: "probe.c", line: 3 }],
+  },
+  [INLINE_BUILD_ID]: {
+    name: INLINE_FUNCTION,
+    start: 0x2d4,
+    size: 16,
+    locations: (address) =>
+      address === 0x2d4
+        ? [
+            { function: "native_leaf", file: "inline-probe.c", line: 2 },
+            { function: "native_middle", file: "inline-probe.c", line: 5 },
+            { function: INLINE_FUNCTION, file: "inline-probe.c", line: 8 },
+          ]
+        : [{ function: INLINE_FUNCTION, file: "inline-probe.c", line: 8 }],
+  },
+};
 const UNKNOWN_BUILD_ID = "0123456789abcdef0123456789abcdef01234567";
 export const NATIVE_EVENT_ID = "0b6f3a7c-1d2e-4f50-8a9b-0c1d2e3f4a03";
 
@@ -135,7 +160,7 @@ const nativeEvent = {
   eventId: NATIVE_EVENT_ID,
   timestamp: "2026-11-09T07:45:00Z",
   errorMessage: "SIGSEGV in native module",
-  stackTrace: `at native ${PROBE_BUILD_ID}+0x2e0\nat native ${UNKNOWN_BUILD_ID}+0x1a40`,
+  stackTrace: `at native ${INLINE_BUILD_ID}+0x2d4\nat native ${PROBE_BUILD_ID}+0x2e0\nat native ${UNKNOWN_BUILD_ID}+0x1a40`,
   release: "2.4.0",
   environment: "production",
   platform: "desktop",
@@ -148,6 +173,7 @@ const nativeEvent = {
 };
 
 const nativeFrames = [
+  { buildId: INLINE_BUILD_ID, address: "0x2d4" },
   { buildId: PROBE_BUILD_ID, address: "0x2e0" },
   { buildId: UNKNOWN_BUILD_ID, address: "0x1a40" },
 ];
@@ -160,6 +186,18 @@ export function readyProbeArtifact(): SymbolArtifact {
     sizeBytes: 6144,
     createdAt: "2026-11-11T08:00:00Z",
     expiresAt: "2026-12-11T08:00:00Z",
+  };
+}
+
+// Uploaded six days before the fixture's "now", so a shorter retention expires it.
+export function readyInlineArtifact(): SymbolArtifact {
+  return {
+    id: "c7d1e2f3-0000-4000-8000-0000000000b2",
+    buildId: INLINE_BUILD_ID,
+    status: "ready",
+    sizeBytes: 9216,
+    createdAt: "2026-11-05T15:00:00Z",
+    expiresAt: "2026-12-05T15:00:00Z",
   };
 }
 
@@ -243,6 +281,7 @@ export class FixtureApi {
   ];
   cleared = false;
   symbolsEnabled = true;
+  sourceStatus: SourceStatus = "available";
   nativeSymbols: Record<BuildMode, SymbolArtifact[]> = { release: [], debug: [] };
   private uploadCount = 0;
   interceptor: Interceptor | undefined;
@@ -342,6 +381,7 @@ export class FixtureApi {
       const next = body as typeof this.monitoringSettings;
       if (next.monitoringRetentionDays < 1 || next.monitoringRetentionDays > 30) return { status: 400 };
       this.monitoringSettings = next;
+      this.applySymbolRetention(next.monitoringRetentionDays);
       return { status: 200, body: next };
     }
     if (path === "/monitoring/data" && method === "GET") {
@@ -422,17 +462,35 @@ export class FixtureApi {
   private frames(url: URL): Reply {
     if (!url.pathname.includes(`/events/${NATIVE_EVENT_ID}/`)) return { status: 404 };
     const ready = this.nativeSymbols[this.scope(url)].filter((a) => a.status === "ready");
+    const unresolved = { function: null, offset: null, sourceStatus: "unavailable", locations: [] };
     const frames = nativeFrames.map((frame) => {
       const address = parseInt(frame.address, 16);
       const matches = ready.filter((a) => a.buildId === frame.buildId);
-      const inside =
-        matches.length === 1 && address >= PROBE_FUNCTION_START && address < PROBE_FUNCTION_START + PROBE_FUNCTION_SIZE;
-      if (matches.length > 1) return { ...frame, status: "ambiguous", function: null, offset: null };
-      return inside
-        ? { ...frame, status: "resolved", function: PROBE_FUNCTION, offset: address - PROBE_FUNCTION_START }
-        : { ...frame, status: "unresolved", function: null, offset: null };
+      if (matches.length > 1) return { ...frame, status: "ambiguous", ...unresolved };
+      const fn = sampleFunctions[frame.buildId];
+      if (matches.length === 0 || !fn || address < fn.start || address >= fn.start + fn.size) {
+        return { ...frame, status: "unresolved", ...unresolved };
+      }
+      const available = this.sourceStatus === "available";
+      return {
+        ...frame,
+        status: "resolved",
+        function: fn.name,
+        offset: address - fn.start,
+        sourceStatus: this.sourceStatus,
+        locations: available ? fn.locations(address) : [],
+      };
     });
-    return { status: 200, body: { capability: "function-only", frames } };
+    return { status: 200, body: { capability: "function-and-source", frames } };
+  }
+
+  // Like the backend, symbol data expires by the current retention counted from upload.
+  private applySymbolRetention(days: number) {
+    for (const mode of ["release", "debug"] as const) {
+      this.nativeSymbols[mode] = this.nativeSymbols[mode]
+        .map((a) => ({ ...a, expiresAt: new Date(Date.parse(a.createdAt) + days * DAY_MS).toISOString() }))
+        .filter((a) => Date.parse(a.expiresAt) > FIXTURE_NOW);
+    }
   }
 
   private performanceSummary(url: URL): Reply {
