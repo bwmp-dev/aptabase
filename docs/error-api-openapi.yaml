@@ -1,7 +1,22 @@
 openapi: 3.0.3
 info:
   title: Aptabase Error Reporting API
-  description: Error ingestion endpoint for the Aptabase error reporting feature.
+  description: |
+    Error reporting and issue tracking for Aptabase.
+    Authenticated issue endpoints are GET /api/v0/apps/{appId}/issues,
+    GET /api/v0/apps/{appId}/issues/{issueId}, and PATCH on the detail URL.
+    All accept buildMode=release|debug (default release). List also accepts
+    status=unresolved|resolved|all (default unresolved), offset >= 0 and limit
+    1..100 (default 50). Counts and timestamps cover the lifetime of the issue.
+    List returns {issues, pagination: {offset, limit, total}, canManage}.
+    Detail returns {issue, canManage}. Issue fields are id, errorType,
+    errorMessage, stackTrace, status, occurrenceCount, firstSeen, lastSeen,
+    and nullable resolvedAt. Timestamps are UTC ISO 8601.
+    PATCH accepts {status: resolved|unresolved} and returns the detail shape.
+    Owners and shared readers may read; only owners may PATCH. Invalid inputs
+    return 400, unauthenticated requests 401, denied access 403, and missing
+    issues within an accessible app 404. Issue storage adds no session or user
+    identifiers and preserves a single sanitized representative report.
   version: 0.1.0
 
 servers:
@@ -18,8 +33,15 @@ paths:
         storage in ClickHouse. The endpoint is CORS-enabled (AllowAny) and
         rate-limited to 20 requests/second per IP (`EventIngestion` policy).
 
-        Returns **202 Accepted** on success (the error is buffered, not yet
-        persisted).
+        Returns **202 Accepted** once the issue aggregate is persisted in PostgreSQL
+        and the raw error is buffered for ClickHouse/Tinybird. Raw error storage
+        remains asynchronous. Each accepted request counts as one occurrence;
+        SDK retries are not deduplicated. Issues cover new reports only.
+
+        Grouping v1 hashes the sanitized error type and whitespace-normalized
+        stack trace, falling back to the sanitized message when no stack exists.
+        Groups are scoped to the app and debug/release mode. Resolved groups
+        keep counting reports but remain resolved until explicitly reopened.
       parameters:
         - name: App-Key
           in: header

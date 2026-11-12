@@ -39,31 +39,31 @@ public class ErrorBody
         if (ErrorType.Length > 100)
             return false;
 
-        if (!string.IsNullOrWhiteSpace(StackTrace) && StackTrace.Length > 10000)
+        if (StackTrace?.Length > 10000)
             return false;
 
-        if (!string.IsNullOrWhiteSpace(Platform) && Platform.Length > 30)
+        if (Platform?.Length > 30)
             return false;
 
-        if (!string.IsNullOrWhiteSpace(OsName) && OsName.Length > 30)
+        if (OsName?.Length > 30)
             return false;
 
-        if (!string.IsNullOrWhiteSpace(OsVersion) && OsVersion.Length > 100)
+        if (OsVersion?.Length > 100)
             return false;
 
-        if (!string.IsNullOrWhiteSpace(AppVersion) && AppVersion.Length > 50)
+        if (AppVersion?.Length > 50)
             return false;
 
-        if (!string.IsNullOrWhiteSpace(SdkVersion) && SdkVersion.Length > 40)
+        if (SdkVersion?.Length > 40)
             return false;
 
-        if (!string.IsNullOrWhiteSpace(SessionId) && SessionId.Length > 100)
+        if (SessionId?.Length > 100)
             return false;
 
-        if (!string.IsNullOrWhiteSpace(Severity) && Severity.Length > 20)
+        if (Severity?.Length > 20)
             return false;
 
-        if (!string.IsNullOrWhiteSpace(Kind) && Kind.Length > 20)
+        if (Kind?.Length > 20)
             return false;
 
         return true;

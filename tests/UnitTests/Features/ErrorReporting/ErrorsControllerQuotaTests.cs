@@ -25,6 +25,7 @@ public class ErrorsControllerQuotaTests
 {
     private const string AppId = "APP-123";
 
+    private readonly Mock<IIssueStore> _issues = new();
     private readonly Mock<IErrorBuffer> _buffer = new();
     private readonly Mock<IPiiSanitizer> _piiSanitizer = new();
     private readonly Mock<IErrorQueryClient> _errorQueryClient = new();
@@ -90,10 +91,40 @@ public class ErrorsControllerQuotaTests
         _db.VerifyGet(d => d.Connection, Times.AtLeastOnce());
     }
 
+    [Fact]
+    public async Task Records_Sanitized_Issue_Before_Buffering()
+    {
+        _piiSanitizer.Setup(s => s.Sanitize(It.IsAny<string?>())).Returns("redacted");
+        var controller = CreateController(errorQuotaEnabled: false);
+        await controller.PostError(CreateValidBody(), default);
+        _issues.Verify(s => s.Record(It.Is<TrackingError>(e => e.AppId == AppId &&
+            e.ErrorType == "redacted" && e.ErrorMessage == "redacted" && e.StackTrace == "redacted"), default), Times.Once());
+        _buffer.Verify(b => b.Add(ref It.Ref<TrackingError>.IsAny), Times.Once());
+    }
+
+    [Fact]
+    public async Task Does_Not_Accept_Or_Buffer_When_Issue_Persistence_Fails()
+    {
+        _issues.Setup(s => s.Record(It.IsAny<TrackingError>(), default)).ThrowsAsync(new InvalidOperationException("database unavailable"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateController(false).PostError(CreateValidBody(), default));
+        _buffer.Verify(b => b.Add(ref It.Ref<TrackingError>.IsAny), Times.Never());
+    }
+
+    [Fact]
+    public async Task Invalid_Report_Does_Not_Create_Issue()
+    {
+        var body = CreateValidBody();
+        body.ErrorMessage = "";
+        Assert.IsType<BadRequestObjectResult>(await CreateController(false).PostError(body, default));
+        _issues.VerifyNoOtherCalls();
+        _buffer.VerifyNoOtherCalls();
+    }
+
     private ErrorsController CreateController(bool errorQuotaEnabled)
     {
         var controller = new ErrorsController(
             _buffer.Object,
+            _issues.Object,
             _piiSanitizer.Object,
             _errorQueryClient.Object,
             _db.Object,

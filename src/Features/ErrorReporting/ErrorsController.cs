@@ -19,6 +19,7 @@ public class ErrorsController : ControllerBase
     // exhausted app can keep getting rejected for up to this duration.
     private static readonly TimeSpan QuotaExhaustedCacheDuration = TimeSpan.FromMinutes(5);
 
+    private readonly IIssueStore _issues;
     private readonly IErrorBuffer _buffer;
     private readonly IPiiSanitizer _piiSanitizer;
     private readonly IErrorQueryClient _errorQueryClient;
@@ -29,6 +30,7 @@ public class ErrorsController : ControllerBase
 
     public ErrorsController(
         IErrorBuffer buffer,
+        IIssueStore issues,
         IPiiSanitizer piiSanitizer,
         IErrorQueryClient errorQueryClient,
         IDbContext db,
@@ -37,6 +39,7 @@ public class ErrorsController : ControllerBase
         ILogger<ErrorsController> logger)
     {
         _buffer = buffer;
+        _issues = issues;
         _piiSanitizer = piiSanitizer;
         _errorQueryClient = errorQueryClient;
         _db = db;
@@ -112,7 +115,7 @@ public class ErrorsController : ControllerBase
             AppId = app.Id,
             Timestamp = body.Timestamp!.Value,
             ErrorMessage = sanitizedErrorMessage,
-            ErrorType = body.ErrorType!,
+            ErrorType = _piiSanitizer.Sanitize(body.ErrorType),
             StackTrace = sanitizedStackTrace,
             Platform = body.Platform,
             OsName = body.OsName,
@@ -124,6 +127,8 @@ public class ErrorsController : ControllerBase
             Kind = body.Kind,
             IsDebug = body.IsDebug
         };
+
+        await _issues.Record(trackingError, cancellationToken);
 
         // Add to buffer
         _buffer.Add(ref trackingError);

@@ -160,6 +160,7 @@ public partial class Program
         builder.Services.AddSingleton<IBlobService, DatabaseBlobService>();
         builder.Services.AddSingleton<IEventBuffer, InMemoryEventBuffer>();
         builder.Services.AddSingleton<IErrorBuffer, InMemoryErrorBuffer>();
+        builder.Services.AddSingleton<IIssueStore, IssueStore>();
         builder.Services.AddSingleton<IPiiSanitizer, PiiSanitizer>();
         builder.Services.AddHostedService<EventBackgroundWritter>();
         builder.Services.AddHostedService<ErrorBackgroundWritter>();
