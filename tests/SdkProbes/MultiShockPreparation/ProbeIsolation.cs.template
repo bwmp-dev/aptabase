@@ -24,4 +24,4 @@ internal static class ProbeIsolation
             return base.SendAsync(request, ct);
         }
     }
-}
+}

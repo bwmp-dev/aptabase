@@ -144,6 +144,13 @@ A	tests/SdkProbes/Java/run.ps1
 A	tests/SdkProbes/MauiWindowsCompile/CompileProbe.cs
 A	tests/SdkProbes/MauiWindowsCompile/MauiWindowsCompile.csproj
 A	tests/SdkProbes/MauiWindowsCompile/packages.lock.json
+A	tests/SdkProbes/MultiShockPreparation/App.xaml.cs.template
+A	tests/SdkProbes/MultiShockPreparation/IsolatedProbe.csproj.template
+A	tests/SdkProbes/MultiShockPreparation/MauiProgram.cs.template
+A	tests/SdkProbes/MultiShockPreparation/ProbeIsolation.cs.template
+A	tests/SdkProbes/MultiShockPreparation/packages.lock.json
+A	tests/SdkProbes/MultiShockPreparation/prepare.py
+A	tests/SdkProbes/MultiShockPreparation/verify.py
 A	tests/SdkProbes/Native/inline-probe.c
 A	tests/SdkProbes/Native/probe.c
 A	tests/SdkProbes/Native/run.ps1
