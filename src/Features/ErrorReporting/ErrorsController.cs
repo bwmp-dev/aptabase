@@ -14,7 +14,6 @@ namespace Aptabase.Features.ErrorReporting;
 public class ErrorsController : ControllerBase
 {
     private readonly IIssueStore _issues;
-    private readonly IErrorBuffer _buffer;
     private readonly IPiiSanitizer _piiSanitizer;
     private readonly IErrorQueryClient _errorQueryClient;
     private readonly IDbContext _db;
@@ -22,7 +21,6 @@ public class ErrorsController : ControllerBase
     private readonly ILogger<ErrorsController> _logger;
 
     public ErrorsController(
-        IErrorBuffer buffer,
         IIssueStore issues,
         IPiiSanitizer piiSanitizer,
         IErrorQueryClient errorQueryClient,
@@ -30,7 +28,6 @@ public class ErrorsController : ControllerBase
         EnvSettings env,
         ILogger<ErrorsController> logger)
     {
-        _buffer = buffer;
         _issues = issues;
         _piiSanitizer = piiSanitizer;
         _errorQueryClient = errorQueryClient;
@@ -99,9 +96,6 @@ public class ErrorsController : ControllerBase
             _logger.LogDebug("Error quota exceeded for app {AppId}", app.Id);
             return StatusCode(403, new { error = "Error quota exceeded" });
         }
-
-        // Add to buffer
-        _buffer.Add(ref trackingError);
 
         // Return 202 Accepted
         return Accepted();

@@ -160,7 +160,7 @@ public partial class Program
         builder.Services.AddHostedService<RejectionStatsReporter>();
         builder.Services.AddSingleton<IBlobService, DatabaseBlobService>();
         builder.Services.AddSingleton<IEventBuffer, InMemoryEventBuffer>();
-        builder.Services.AddSingleton<IErrorBuffer, InMemoryErrorBuffer>();
+        builder.Services.AddSingleton<ErrorOutbox>();
         builder.Services.AddSingleton<IIssueStore, IssueStore>();
         builder.Services.AddHostedService<PurgeErrorReceiptsJob>();
         builder.Services.AddSingleton<PerformanceStore>();

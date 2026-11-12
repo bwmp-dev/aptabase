@@ -1,5 +1,5 @@
 SELECT error_type as Name,
-       count(*) as Value
+       uniqExact(error_id) as Value
 FROM error_events
 WHERE app_id = '{{app_id}}'
 AND timestamp >= toDateTime('{{start_date}}')

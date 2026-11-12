@@ -45,7 +45,6 @@ public class IssueIngestionTests
                     ('app-b', 'owner', 'App B', 'KEY-B', false, 100);
                 """);
             var store = new IssueStore(db);
-            var buffer = new InMemoryErrorBuffer();
             var env = (EnvSettings)Activator.CreateInstance(typeof(EnvSettings), nonPublic: true)!;
             typeof(EnvSettings).GetProperty(nameof(EnvSettings.ErrorQuotaEnabled))!.SetValue(env, true);
             var builder = WebApplication.CreateBuilder();
@@ -54,7 +53,6 @@ public class IssueIngestionTests
             builder.Services.AddSingleton<IDbContext>(db);
             builder.Services.AddSingleton<IIssueStore>(store);
             builder.Services.AddSingleton<PerformanceStore>();
-            builder.Services.AddSingleton<IErrorBuffer>(buffer);
             builder.Services.AddSingleton<IPiiSanitizer, PiiSanitizer>();
             builder.Services.AddSingleton<IAppQueries, AppQueries>();
             builder.Services.AddSingleton<IIngestionCache, IngestionCache>();
@@ -89,7 +87,7 @@ public class IssueIngestionTests
             Assert.Equal(HttpStatusCode.BadRequest, (await http.PostAsJsonAsync("/api/v0/error", Body("bad-id"))).StatusCode);
             var responses = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => http.PostAsJsonAsync("/api/v0/error", Body(eventId))));
             Assert.All(responses, response => Assert.Equal(HttpStatusCode.Accepted, response.StatusCode));
-            Assert.Equal(1, buffer.Count());
+            Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_outbox"));
             Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT error_count FROM apps WHERE id = 'app-a'"));
             Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts WHERE app_id = 'app-a'"));
             var rejectedId = Guid.NewGuid().ToString();
@@ -175,11 +173,40 @@ public class IssueIngestionTests
             await connection.ExecuteAsync("UPDATE app_transactions SET received_at = CURRENT_TIMESTAMP - INTERVAL '31 days'");
             Assert.Equal(2, await performance.Purge(default));
             Assert.Equal(0, (await performance.List(perfFilter, 0, 50, default)).Total);
+            var pending = await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_outbox");
+            Assert.True(pending > 0);
+            var sink = new LocalErrorSink { FailAfterAccepting = true };
+            var outbox = new ErrorOutbox(db, sink);
+            await Assert.ThrowsAsync<IOException>(() => outbox.Flush());
+            Assert.Equal(pending, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_outbox"));
+            sink.FailAfterAccepting = false;
+            sink.PartialAcknowledgement = true;
+            await Assert.ThrowsAsync<InvalidOperationException>(() => outbox.Flush());
+            Assert.Equal(pending, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_outbox"));
+            sink.PartialAcknowledgement = false;
+            Assert.Equal(pending, (await Task.WhenAll(outbox.Flush(), outbox.Flush())).Sum());
+            Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_outbox"));
+            Assert.Equal(pending, sink.Received.Distinct().Count());
+            Assert.True(sink.Received.Count > pending); // Lost acknowledgements permit raw sink replay; reads deduplicate IDs.
             await app.StopAsync();
         }
         finally
         {
             await admin.ExecuteAsync($"DROP DATABASE {database} WITH (FORCE)");
+        }
+    }
+
+    private class LocalErrorSink : IErrorIngestionClient
+    {
+        public bool FailAfterAccepting { get; set; }
+        public bool PartialAcknowledgement { get; set; }
+        public List<string> Received { get; } = new();
+        public Task<long> BulkSendErrorAsync(IEnumerable<ErrorRow> rows, CancellationToken ct = default)
+        {
+            var batch = rows.ToArray();
+            Received.AddRange(batch.Select(r => r.AppId + ":" + r.ErrorId));
+            if (FailAfterAccepting) throw new IOException("Simulated lost sink acknowledgement");
+            return Task.FromResult((long)(PartialAcknowledgement ? batch.Length - 1 : batch.Length));
         }
     }
 

@@ -1,4 +1,4 @@
-SELECT count(*) as Count
+SELECT uniqExact(error_id) as Count
 FROM error_events
 WHERE app_id = '{{app_id}}'
 AND timestamp >= toDateTime('{{start_date}}')

@@ -4,7 +4,7 @@ NODE endpoint
 SQL >
 
 %
-    SELECT count(*) as Count
+    SELECT uniqExact(error_id) as Count
     FROM error_events
     PREWHERE app_id = {{String(app_id)}}
     AND timestamp >= {{DateTime(start_date)}}

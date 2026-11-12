@@ -26,7 +26,8 @@ SQL >
     {% if defined(os_name) %}AND os_name = {{String(os_name)}}{% end %}
     {% if defined(severity) %}AND severity = {{String(severity)}}{% end %}
     {% if defined(kind) %}AND kind = {{String(kind)}}{% end %}
-    ORDER BY timestamp DESC
+    ORDER BY timestamp DESC, error_id
+    LIMIT 1 BY error_id
     LIMIT {{Int32(limit)}} OFFSET {{Int32(offset)}}
 
 TYPE endpoint

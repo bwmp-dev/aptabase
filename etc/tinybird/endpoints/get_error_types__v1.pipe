@@ -5,7 +5,7 @@ SQL >
 
 %
     SELECT error_type as Name,
-           count(*) as Value
+           uniqExact(error_id) as Value
     FROM error_events
     PREWHERE app_id = {{String(app_id)}}
     AND timestamp >= {{DateTime(start_date)}}

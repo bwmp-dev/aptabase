@@ -30,7 +30,7 @@ The fork's LICENSE and attribution remain unchanged. Any future copied source re
 - [x] Literal bounded issue search with scoped pagination and query validation.
 - [x] HTTP ingestion through real filters/controllers to PostgreSQL; owner/shared/stranger, malformed bodies, lifecycle, concurrent ingestion and rollback.
 - [ ] Nonintrusive headless desktop/mobile visual and keyboard checks; distinguish mocked-network UI checks from real HTTP/database end-to-end coverage.
-- [ ] Durable delivery to raw error storage. Current in-memory raw buffer can lose accepted events on crashes or sink failure; issue persistence alone is not exactly-once end-to-end delivery. Design outbox and downstream deduplication together for ClickHouse and Tinybird.
+- [x] Durable PostgreSQL outbox committed with issue/receipt/quota; bounded retry batches and deduplicated raw reads for ClickHouse/Tinybird. Transport remains at-least-once; no exactly-once network claim.
 
 ### 2. Triage context, environments and releases
 - [x] Backend bounded sanitized event context/detail, latest/recent occurrences linked to issue; no request bodies, cookies, headers, user IDs or session identities by default.
@@ -108,3 +108,11 @@ Retained occurrences now carry sanitized message/stack and allowlisted app/OS/SD
 ### Headless real-API test host
 
 `tests/MonitoringHost` is a standalone loopback-only executable, excluded from production registration. It requires an explicit isolated PostgreSQL connection, creates/drops its own database, serves built webapp files and terminates after 15 minutes. It uses real monitoring controllers and cookie authentication, with test-only login/bootstrap endpoints; no production auth or external email is used. Raw analytics sink reads are intentionally unsupported. Build and loopback health check passed. Browser assertions are delegated to Opus.
+
+### Durable raw delivery increment
+
+Replaced the in-memory error buffer with a transactional PostgreSQL outbox. A worker locks at most 200 queued rows, applies a 30-second delivery deadline, and removes them only after full acknowledgement. Failures/partial acknowledgement roll back; restart retries from the database. Delivered payloads are deleted immediately. Undelivered payloads preserve the existing raw fields (including legacy sessionId) for delivery; reports past the existing raw 180-day TTL are removed without sending. Retained issue details still exclude sessionId. This does not change usage-event buffering.
+
+Passed: 248 unit tests and both PostgreSQL/HTTP scenarios, now including lost acknowledgements, partial success and concurrent outbox workers. `python scripts/test-error-query-dedup.py` passed actual ClickHouse query templates against duplicate fixtures using a network-disabled cached ClickHouse 24.8 local process (0.5 CPU/512MB, no server). Matching Tinybird templates changed; hosted Tinybird execution remains unrun. Older ClickHouse local verifies syntax/behavior, not a full production 26.8 deployment.
+
+A build initially found a migration/service class name collision; the migration was renamed and checks passed. Existing NuGet vulnerability warnings remain.

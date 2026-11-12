@@ -18,7 +18,6 @@ public class ErrorsControllerQuotaTests
     private const string AppId = "APP-123";
 
     private readonly Mock<IIssueStore> _issues = new();
-    private readonly Mock<IErrorBuffer> _buffer = new();
     private readonly Mock<IPiiSanitizer> _piiSanitizer = new();
     private readonly Mock<IErrorQueryClient> _errorQueryClient = new();
     private readonly Mock<IDbContext> _db = new();
@@ -38,7 +37,6 @@ public class ErrorsControllerQuotaTests
         var result = await controller.PostError(CreateValidBody(), default);
 
         result.Should().BeOfType<AcceptedResult>();
-        _buffer.Verify(b => b.Add(ref It.Ref<TrackingError>.IsAny), Times.Once());
 
         // Quota disabled must mean zero Postgres round-trips
         _db.VerifyNoOtherCalls();
@@ -47,16 +45,15 @@ public class ErrorsControllerQuotaTests
     [Theory]
     [InlineData(IssueRecordResult.QuotaExceeded, 403)]
     [InlineData(IssueRecordResult.AppUnavailable, 400)]
-    public async Task Rejected_Reports_Are_Not_Buffered(IssueRecordResult outcome, int status)
+    public async Task Rejected_Reports_Return_Expected_Status(IssueRecordResult outcome, int status)
     {
         _issues.Setup(s => s.Record(It.IsAny<TrackingError>(), default, true)).ReturnsAsync(outcome);
         var result = await CreateController(true).PostError(CreateValidBody(), default);
         Assert.Equal(status, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
-        _buffer.VerifyNoOtherCalls();
     }
 
     [Fact]
-    public async Task Duplicate_Is_Accepted_Without_Buffering_And_Uses_Canonical_Event_Id()
+    public async Task Duplicate_Is_Accepted_And_Uses_Canonical_Event_Id()
     {
         var id = Guid.NewGuid();
         var body = CreateValidBody();
@@ -64,26 +61,23 @@ public class ErrorsControllerQuotaTests
         _issues.Setup(s => s.Record(It.IsAny<TrackingError>(), default, true)).ReturnsAsync(IssueRecordResult.Duplicate);
         Assert.IsType<AcceptedResult>(await CreateController(true).PostError(body, default));
         _issues.Verify(s => s.Record(It.Is<TrackingError>(e => e.ErrorId == id.ToString()), default, true), Times.Once());
-        _buffer.VerifyNoOtherCalls();
     }
 
     [Fact]
-    public async Task Records_Sanitized_Issue_Before_Buffering()
+    public async Task Records_Sanitized_Issue()
     {
         _piiSanitizer.Setup(s => s.Sanitize(It.IsAny<string?>())).Returns("redacted");
         var controller = CreateController(errorQuotaEnabled: false);
         await controller.PostError(CreateValidBody(), default);
         _issues.Verify(s => s.Record(It.Is<TrackingError>(e => e.AppId == AppId &&
             e.ErrorType == "redacted" && e.ErrorMessage == "redacted" && e.StackTrace == "redacted"), default, false), Times.Once());
-        _buffer.Verify(b => b.Add(ref It.Ref<TrackingError>.IsAny), Times.Once());
     }
 
     [Fact]
-    public async Task Does_Not_Accept_Or_Buffer_When_Issue_Persistence_Fails()
+    public async Task Does_Not_Accept_When_Issue_Persistence_Fails()
     {
         _issues.Setup(s => s.Record(It.IsAny<TrackingError>(), default, false)).ThrowsAsync(new InvalidOperationException("database unavailable"));
         await Assert.ThrowsAsync<InvalidOperationException>(() => CreateController(false).PostError(CreateValidBody(), default));
-        _buffer.Verify(b => b.Add(ref It.Ref<TrackingError>.IsAny), Times.Never());
     }
 
     [Fact]
@@ -93,13 +87,11 @@ public class ErrorsControllerQuotaTests
         body.ErrorMessage = "";
         Assert.IsType<BadRequestObjectResult>(await CreateController(false).PostError(body, default));
         _issues.VerifyNoOtherCalls();
-        _buffer.VerifyNoOtherCalls();
     }
 
     private ErrorsController CreateController(bool errorQuotaEnabled)
     {
         var controller = new ErrorsController(
-            _buffer.Object,
             _issues.Object,
             _piiSanitizer.Object,
             _errorQueryClient.Object,

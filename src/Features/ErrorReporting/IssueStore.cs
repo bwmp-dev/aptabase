@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Aptabase.Data;
 using Aptabase.Features.Authentication;
 using Aptabase.Features.ErrorReporting.Buffer;
@@ -104,6 +105,11 @@ public class IssueStore(IDbContext db) : IIssueStore
             """, new { error.AppId, error.IsDebug,
                 id = IssueFingerprint.Create(error.ErrorType, error.ErrorMessage, error.StackTrace),
                 error.ErrorType, error.ErrorMessage, stack = error.StackTrace ?? "", error.Timestamp },
+            transaction, cancellationToken: cancellationToken));
+        await connection.ExecuteAsync(new CommandDefinition("""
+            INSERT INTO error_outbox (app_id, is_debug, event_id, payload)
+            VALUES (@AppId, @IsDebug, @eventId, CAST(@payload AS jsonb)) ON CONFLICT DO NOTHING
+            """, new { error.AppId, error.IsDebug, eventId = Guid.Parse(error.ErrorId), payload = JsonSerializer.Serialize(error) },
             transaction, cancellationToken: cancellationToken));
         await transaction.CommitAsync(cancellationToken);
         return IssueRecordResult.Accepted;

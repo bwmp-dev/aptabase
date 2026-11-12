@@ -20,5 +20,6 @@ AND timestamp <= toDateTime('{{end_date}}')
 {% if os_name %}AND os_name = '{{os_name}}'{% endif %}
 {% if severity %}AND severity = '{{severity}}'{% endif %}
 {% if kind %}AND kind = '{{kind}}'{% endif %}
-ORDER BY timestamp DESC
+ORDER BY timestamp DESC, error_id
+LIMIT 1 BY error_id
 LIMIT {{limit}} OFFSET {{offset}}

@@ -42,7 +42,7 @@ public class TinybirdErrorIngestionClient : IErrorIngestionClient
         {
             try
             {
-                var response = await _httpClient.PostAsync(path, content, ct);
+                using var response = await _httpClient.PostAsync(path, content, ct);
                 response.EnsureSuccessStatusCode();
 
                 var result = await response.Content.ReadFromJsonAsync<InsertErrorResult>() ?? new InsertErrorResult();
@@ -51,10 +51,10 @@ public class TinybirdErrorIngestionClient : IErrorIngestionClient
 
                 return result.SuccessfulRows;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!ct.IsCancellationRequested)
             {
                 _logger.LogWarning(ex, "Failed to send errors to Tinybird. Will retry again after {Delay}ms.", _retriesDelay[i].TotalMilliseconds);
-                await Task.Delay(_retriesDelay[i]);
+                await Task.Delay(_retriesDelay[i], ct);
             }
         }
 

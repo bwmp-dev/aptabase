@@ -54,7 +54,6 @@ public static class MonitoringHostMain
             builder.Services.AddSingleton<IAppQueries, AppQueries>();
             builder.Services.AddSingleton<IIngestionCache, IngestionCache>();
             builder.Services.AddSingleton<IRejectionStats, RejectionStats>();
-            builder.Services.AddSingleton<IErrorBuffer, InMemoryErrorBuffer>();
             builder.Services.AddSingleton<IErrorQueryClient>(new ClickHouseErrorQueryClient(new RejectAnalyticsQueries()));
             builder.Services.AddMemoryCache();
             builder.Services.AddDataProtection().UseEphemeralDataProtectionProvider();

@@ -40,12 +40,12 @@ paths:
       operationId: postError
       summary: Ingest an application error
       description: |
-        Accepts an error report from an application SDK and buffers it for
-        storage in ClickHouse. The endpoint is CORS-enabled (AllowAny) and
+        Accepts an error report from an application SDK and durably queues it for
+        storage in ClickHouse or Tinybird. The endpoint is CORS-enabled (AllowAny) and
         rate-limited to 20 requests/second per IP (`EventIngestion` policy).
 
         Returns **202 Accepted** once the issue aggregate is persisted in PostgreSQL
-        and the raw error is buffered for ClickHouse/Tinybird. Raw error storage
+        and the raw error is durably queued for ClickHouse/Tinybird. Raw error storage
         remains asynchronous. Each newly accepted event counts as one occurrence;
         SDK retries with the same eventId are deduplicated per app/build for at least
         30 days. Legacy senders without eventId produce a new occurrence per request. Issues cover new reports only.
@@ -56,7 +56,12 @@ paths:
         strictly after resolvedAt automatically reopens its issue. Delayed older
         events and duplicate retries do not reopen it. Client timestamps are
         normalized to UTC and future timestamps are clamped to reception time.
-        Receipt, quota and issue updates are atomic. First accepted payload wins
+        Receipt, quota, issue and raw outbox updates are atomic. Raw delivery uses
+        bounded batches and retries; acknowledgement loss can replay a batch.
+        Raw error list/count/type queries deduplicate by event ID on both backends.
+        Delivered queue payloads are removed immediately; undelivered payloads
+        retain existing raw error fields until delivery or the existing 180-day
+        raw TTL. Retained occurrence details omit session identifiers. First accepted payload wins
         for an eventId; do not reuse IDs for distinct occurrences. Expired receipts
         are purged in batches, so retries after 30 days may count again.
       parameters:
@@ -91,7 +96,7 @@ paths:
               isDebug: false
       responses:
         "202":
-          description: Accepted – error has been buffered for processing.
+          description: Accepted – error has been durably queued for processing.
         "400":
           description: Bad request – invalid payload or missing App-Key header.
           content:
