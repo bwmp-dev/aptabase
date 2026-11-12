@@ -57,7 +57,7 @@ public class SentryController(IDbContext db, IIssueStore issues, ErrorIngestionS
             """, new { appId }, cancellationToken: cancellationToken));
         var baseUri = new Uri(env.SelfBaseUrl);
         return Ok(new { projects = rows.Select(p => new { id = p.Id.ToString(), buildMode = p.IsDebug ? "debug" : "release",
-            dsn = $"{baseUri.Scheme}://{Uri.EscapeDataString(p.AppKey)}@{baseUri.Authority}/{p.Id}" }) });
+            dsn = $"{baseUri.Scheme}://{SentryIngestionKey.Create(p)}@{baseUri.Authority}/{p.Id}" }) });
     }
 
     [HttpPost("/api/{projectId:long}/envelope/")]
@@ -108,10 +108,10 @@ public class SentryController(IDbContext db, IIssueStore issues, ErrorIngestionS
         if (keys.Count == 0 || keys.Any(k => k.Length == 0 || k.Length > 100 || !string.Equals(k, keys[0], StringComparison.Ordinal))) return StatusCode(403);
         await using var connection = db.Connection;
         var project = await connection.QuerySingleOrDefaultAsync<SentryProject>(new CommandDefinition("""
-            SELECT p.id, p.app_id, p.is_debug FROM sentry_projects p JOIN apps a ON a.id = p.app_id JOIN users u ON u.id = a.owner_id
-            WHERE p.id = @projectId AND a.app_key = @key AND a.deleted_at IS NULL AND u.lock_reason IS NULL
-            """, new { projectId, key = keys[0] }, cancellationToken: cancellationToken));
-        if (project is null) return StatusCode(403);
+            SELECT p.id, p.app_id, p.is_debug, a.app_key FROM sentry_projects p JOIN apps a ON a.id = p.app_id JOIN users u ON u.id = a.owner_id
+            WHERE p.id = @projectId AND a.deleted_at IS NULL AND u.lock_reason IS NULL
+            """, new { projectId }, cancellationToken: cancellationToken));
+        if (project is null || !SentryIngestionKey.Matches(project, keys[0])) return StatusCode(403);
         if (envelope.Error is not null)
         {
             envelope.Error.IsDebug = project.IsDebug;

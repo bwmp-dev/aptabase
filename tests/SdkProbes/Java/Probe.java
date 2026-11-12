@@ -6,7 +6,7 @@ public final class Probe {
         String dsn = System.getenv("APTABASE_PROBE_DSN");
         URI uri = URI.create(dsn == null ? "" : dsn);
         if (!"http".equals(uri.getScheme()) || !"127.0.0.1".equals(uri.getHost()) || uri.getPort() != 55440
-                || !"TEST-APP-KEY".equals(uri.getUserInfo()) || !uri.getPath().matches("/[0-9]+")) {
+                || uri.getUserInfo() == null || !uri.getUserInfo().matches("[a-f0-9]{64}") || !uri.getPath().matches("/[0-9]+")) {
             throw new IllegalArgumentException("Only the disposable MonitoringHost DSN is allowed");
         }
         String release = System.getenv("APTABASE_PROBE_RELEASE");

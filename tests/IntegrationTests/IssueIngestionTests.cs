@@ -350,6 +350,7 @@ public class IssueIngestionTests
         var projectId = entries[0].GetProperty("id").GetString();
         var dsn = entries[0].GetProperty("dsn").GetString();
         var endpoint = $"/api/{projectId}/envelope/";
+        await CheckSentryCredentials(http, connection, entries);
         var eventId = Guid.NewGuid().ToString("N");
         string Envelope(string type = "event", string? extra = null) => JsonSerializer.Serialize(new { dsn, event_id = eventId }) + "\n" +
             JsonSerializer.Serialize(new { type }) + "\n" + JsonSerializer.Serialize(new {
@@ -452,6 +453,83 @@ public class IssueIngestionTests
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge, (await http.PostAsync(endpoint, hugeContent)).StatusCode);
         await connection.ExecuteAsync("UPDATE apps SET deleted_at=CURRENT_TIMESTAMP WHERE id='app-b'");
         Assert.Equal(HttpStatusCode.Forbidden, (await Send(Envelope())).StatusCode);
+    }
+
+    private static async Task CheckSentryCredentials(HttpClient http, System.Data.Common.DbConnection connection, JsonElement[] projects)
+    {
+        var release = projects.Single(p => p.GetProperty("buildMode").GetString() == "release");
+        var debug = projects.Single(p => p.GetProperty("buildMode").GetString() == "debug");
+        var id = release.GetProperty("id").GetString()!;
+        var dsn = release.GetProperty("dsn").GetString()!;
+        var key = new Uri(dsn).UserInfo;
+        var debugId = debug.GetProperty("id").GetString()!;
+        var debugDsn = debug.GetProperty("dsn").GetString()!;
+        Assert.Matches("^[a-f0-9]{64}$", key);
+        Assert.NotEqual(key, new Uri(debugDsn).UserInfo);
+        var legacyDsn = $"http://KEY-B@localhost/{id}";
+        var accepted = await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts");
+        async Task Send(HttpStatusCode expected, string target, string? envelopeDsn = null, string? headerKey = null, string? queryKey = null)
+        {
+            var data = JsonSerializer.Serialize(new { dsn = envelopeDsn }) + "\n{\"type\":\"event\"}\n" +
+                JsonSerializer.Serialize(new { event_id = Guid.NewGuid().ToString("N"), message = "dsn-auth-probe" });
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/{target}/envelope/" + (queryKey is null ? "" : "?sentry_key=" + Uri.EscapeDataString(queryKey)));
+            request.Content = new StringContent(data, Encoding.UTF8, "application/x-sentry-envelope");
+            if (headerKey is not null) request.Headers.Add("X-Sentry-Auth", "Sentry sentry_key=" + headerKey);
+            using var response = await http.SendAsync(request);
+            Assert.Equal(expected, response.StatusCode);
+            if (expected == HttpStatusCode.OK) accepted++;
+            Assert.Equal(accepted, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts"));
+        }
+        await Send(HttpStatusCode.OK, id, legacyDsn);
+        await Send(HttpStatusCode.OK, id, headerKey: "KEY-B");
+        await Send(HttpStatusCode.OK, id, queryKey: "KEY-B");
+        await Send(HttpStatusCode.OK, id, dsn, key, key);
+        await Send(HttpStatusCode.OK, id, headerKey: key);
+        await Send(HttpStatusCode.OK, id, queryKey: key);
+        await Send(HttpStatusCode.OK, debugId, debugDsn);
+        Assert.True(await connection.ExecuteScalarAsync<bool>("SELECT EXISTS (SELECT 1 FROM error_receipts WHERE app_id='app-b' AND is_debug AND error_message='dsn-auth-probe')"));
+        await Send(HttpStatusCode.Forbidden, id, dsn, queryKey: "KEY-B");
+        await Send(HttpStatusCode.Forbidden, id, legacyDsn, headerKey: key);
+        await Send(HttpStatusCode.Forbidden, debugId, dsn);
+        await Send(HttpStatusCode.Forbidden, debugId, headerKey: key);
+        await Send(HttpStatusCode.Forbidden, id, headerKey: new string('0', 64));
+        await Send(HttpStatusCode.Forbidden, id, headerKey: key[..63]);
+        using (var native = new HttpRequestMessage(HttpMethod.Post, "/api/v0/error"))
+        {
+            native.Headers.Add("App-Key", key);
+            native.Content = new StringContent(JsonSerializer.Serialize(new { errorType = "Test", errorMessage = "dsn-auth-probe" }), Encoding.UTF8, "application/json");
+            using var nativeResponse = await http.SendAsync(native);
+            Assert.Equal(HttpStatusCode.Unauthorized, nativeResponse.StatusCode);
+            Assert.Equal(accepted, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts"));
+        }
+        var otherId = await connection.ExecuteScalarAsync<long>("INSERT INTO sentry_projects(app_id,is_debug) VALUES ('app-a',false) RETURNING id");
+        await Send(HttpStatusCode.Forbidden, otherId.ToString(), headerKey: key);
+        await Send(HttpStatusCode.Forbidden, otherId.ToString(), legacyDsn);
+        Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts WHERE app_id='app-a' AND error_message='dsn-auth-probe'"));
+
+        http.DefaultRequestHeaders.Add("Test-Reader", "true");
+        Assert.Equal(HttpStatusCode.Forbidden, (await http.GetAsync("/api/v0/apps/app-b/sentry-projects")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await http.PostAsync("/api/v0/apps/app-b/sentry-projects", null)).StatusCode);
+        http.DefaultRequestHeaders.Remove("Test-Reader");
+        await connection.ExecuteAsync("UPDATE users SET lock_reason='Q' WHERE id='owner'");
+        await Send(HttpStatusCode.Forbidden, id, dsn);
+        await connection.ExecuteAsync("UPDATE users SET lock_reason=NULL WHERE id='owner'");
+        await connection.ExecuteAsync("UPDATE apps SET app_key='ROTATED-KEY-B' WHERE id='app-b'");
+        await Send(HttpStatusCode.Forbidden, id, dsn);
+        await Send(HttpStatusCode.Forbidden, id, legacyDsn);
+        await Send(HttpStatusCode.Forbidden, id, headerKey: key);
+        await Send(HttpStatusCode.Forbidden, debugId, debugDsn);
+        http.DefaultRequestHeaders.Add("Test-Owner", "true");
+        using var rotatedResponse = await http.GetAsync("/api/v0/apps/app-b/sentry-projects");
+        Assert.Equal(HttpStatusCode.OK, rotatedResponse.StatusCode);
+        using var rotated = JsonDocument.Parse(await rotatedResponse.Content.ReadAsStringAsync());
+        var newDsn = rotated.RootElement.GetProperty("projects")[0].GetProperty("dsn").GetString()!;
+        Assert.NotEqual(dsn, newDsn);
+        Assert.Equal(new Uri(dsn).AbsolutePath, new Uri(newDsn).AbsolutePath);
+        http.DefaultRequestHeaders.Remove("Test-Owner");
+        await Send(HttpStatusCode.OK, id, newDsn);
+        await Send(HttpStatusCode.OK, id, headerKey: "ROTATED-KEY-B");
+        await connection.ExecuteAsync("UPDATE apps SET app_key='KEY-B' WHERE id='app-b'");
     }
 
     private sealed class SdkResponseHandler(HttpMessageHandler inner, System.Collections.Concurrent.ConcurrentQueue<HttpStatusCode> statuses) : DelegatingHandler(inner)

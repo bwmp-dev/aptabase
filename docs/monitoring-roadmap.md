@@ -107,6 +107,16 @@ Backend: GPT-6 Astra high. All frontend code: Claude Opus 5.5 high via T3. Local
 - A first MonitoringHost launch omitted its absolute webroot and exited before database creation; restarted with `MONITORING_TEST_WEBROOT` pointing at the existing production bundle. No frontend code changed in this increment; previous 62 unit/26 fixture/24 real acceptance evidence remains historical, not a rerun. No frontend typecheck/build was needed for these backend/test-only changes.
 - Existing NU1902/NU1903 package advisories remain. No production deployment, mobile simulator/device, native crash dump, server symbolication, hosted Tinybird or load test was run. No real external alerts exist or were enabled.
 
+### Standard JavaScript DSN compatibility fix
+
+The real Node SDK probe found that its standard DSN parser rejects hyphens in Aptabase app keys and sends nothing. A temporary component-object diagnostic proved the remaining pipeline but was removed; it is not supported setup or acceptance evidence for normal DSNs.
+
+The server now emits 64-character lowercase hexadecimal HMAC-SHA256 keys bound to app/project/build and derived from the current app ingestion key. Legacy raw-key DSNs/headers/query credentials remain accepted. Both forms are revoked by underlying app-key rotation; no second credential table, migration, parser bypass or permission change was introduced. Mixed raw/derived credentials in one request remain rejected. A derived key works only at its Sentry project, not native App-Key ingestion or management APIs.
+
+Passed after this fix: **286 unit tests**, both focused PostgreSQL/HTTP scenarios, then **74/74 full integration tests (0 failed/skipped)** in 17 seconds, sequential. Coverage includes all credential transports, old DSNs, mismatches, app/build isolation, reader denial, owner lock, native endpoint rejection, rotation and unchanged project IDs. The first new lock fixture supplied four characters to the existing one-character column; fixed the fixture and reran successfully. Final TRX: `%TEMP%/aptabase-sdk-acceptance/dsn-integration.trx`. Actual .NET6.10.0 SDK passes through the new DSN in the integration suite; actual Java8.64.0 handled/uncaught/performance probe also passes against the rebuilt host with the new DSN.
+
+Opus's Node10.77.1 strict-mode final acceptance and integration of its test-only files are next; diagnostic-mode success is not substituted. The owner symbolication question is unanswered, and no binary/artifact intake was implemented.
+
 ## Historical verification ledger (superseded by checkpoint acceptance below)
 
 Baseline: 232 backend unit tests and one PostgreSQL/HTTP scenario passed; 14 frontend tests, TypeScript and Vite build passed. Full historical integration suite and browser-to-real-backend checks were not run. Existing NuGet vulnerability warnings and React Doctor findings remain outside monitoring scope. Record subsequent exact commands/results here as phases progress; unchecked items are not complete.
