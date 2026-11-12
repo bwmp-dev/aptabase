@@ -17,6 +17,8 @@ public class ErrorBody
     public string? Platform { get; set; }
     public string? OsName { get; set; }
     public string? OsVersion { get; set; }
+    public string? Release { get; set; }
+    public string? Environment { get; set; }
     public string? AppVersion { get; set; }
     public string? SdkVersion { get; set; }
     public string? SessionId { get; set; }
@@ -54,6 +56,9 @@ public class ErrorBody
             return false;
 
         if (OsVersion?.Length > 100)
+            return false;
+
+        if (Release?.Length > 100 || Environment?.Length > 50)
             return false;
 
         if (AppVersion?.Length > 50)

@@ -11,6 +11,8 @@ public readonly struct TrackingError
     public string? Platform { get; init; }
     public string? OsName { get; init; }
     public string? OsVersion { get; init; }
+    public string? Release { get; init; }
+    public string? Environment { get; init; }
     public string? AppVersion { get; init; }
     public string? SdkVersion { get; init; }
     public string? SessionId { get; init; }

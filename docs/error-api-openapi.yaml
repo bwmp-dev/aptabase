@@ -9,6 +9,17 @@ info:
     status=unresolved|resolved|all (default unresolved), offset >= 0 and limit
     1..100 (default 50). Counts and timestamps cover the lifetime of the issue.
     List returns {issues, pagination: {offset, limit, total}, canManage}.
+    List also accepts exact environment (<=50) and release (<=100) filters, matching
+    retained occurrences. Issue counts remain lifetime totals across environments/releases.
+    GET /api/v0/apps/{appId}/issues/{issueId}/events returns retained sanitized
+    occurrences with pagination; accepts buildMode, environment, release, offset and limit.
+    Occurrences include eventId, timestamp, errorMessage, stackTrace, release, environment,
+    platform, osName, osVersion, sdkVersion, severity and kind; no session/user identifiers.
+    They expire with deduplication receipts after at least 30 days. Older issue summaries
+    can therefore exist without retained event details.
+    GET /api/v0/apps/{appId}/releases?buildMode=release|debug returns {releases}, the newest
+    100 observed release/environment pairs with errorCount, transactionCount, firstSeen,
+    lastSeen. These describe retained sampled reports, not deployments or total users.
     Detail returns {issue, canManage}. Issue fields are id, errorType,
     errorMessage, stackTrace, status, occurrenceCount, firstSeen, lastSeen,
     and nullable resolvedAt. Timestamps are UTC ISO 8601.
@@ -207,6 +218,14 @@ components:
         - errorMessage
         - errorType
       properties:
+        release:
+          type: string
+          maxLength: 100
+          description: Optional release label; defaults to appVersion when omitted.
+        environment:
+          type: string
+          maxLength: 50
+          description: Optional deployment environment label, independent of debug/release build mode.
         eventId:
           type: string
           description: Optional nonzero UUID (32 hex or hyphenated). Persist across retries of the same event.

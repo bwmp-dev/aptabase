@@ -20,6 +20,23 @@ public class Issue
 
 public enum IssueRecordResult { Accepted, Duplicate, QuotaExceeded, AppUnavailable }
 
+public class IssueEvent
+{
+    public Guid EventId { get; set; }
+    public DateTime Timestamp { get; set; }
+    public string ErrorMessage { get; set; } = "";
+    public string StackTrace { get; set; } = "";
+    public string Release { get; set; } = "";
+    public string Environment { get; set; } = "";
+    public string Platform { get; set; } = "";
+    public string OsName { get; set; } = "";
+    public string OsVersion { get; set; } = "";
+    public string SdkVersion { get; set; } = "";
+    public string Severity { get; set; } = "";
+    public string Kind { get; set; } = "";
+}
+
+public record IssueEventPage(IEnumerable<IssueEvent> Events, long Total);
 public record IssuePage(IEnumerable<Issue> Issues, long Total);
 public record IssueAccess(bool CanRead, bool CanManage);
 
@@ -28,7 +45,8 @@ public interface IIssueStore
     Task<IssueRecordResult> Record(TrackingError error, CancellationToken cancellationToken, bool enforceQuota = false);
     Task<int> PurgeExpiredReceipts(CancellationToken cancellationToken);
     Task<IssueAccess> GetAccess(string appId, UserIdentity user, CancellationToken cancellationToken);
-    Task<IssuePage> List(string appId, bool isDebug, string status, int offset, int limit, CancellationToken cancellationToken, string q = "");
+    Task<IssuePage> List(string appId, bool isDebug, string status, int offset, int limit, CancellationToken cancellationToken, string q = "", string? environment = null, string? release = null);
+    Task<IssueEventPage> Events(string appId, bool isDebug, string id, int offset, int limit, CancellationToken cancellationToken, string? environment = null, string? release = null);
     Task<Issue?> Get(string appId, bool isDebug, string id, CancellationToken cancellationToken);
     Task<Issue?> SetStatus(string appId, bool isDebug, string id, string status, string ownerId, CancellationToken cancellationToken);
 }
@@ -40,10 +58,17 @@ public class IssueStore(IDbContext db) : IIssueStore
         await using var connection = db.Connection;
         await connection.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-        var parameters = new { error.AppId, error.IsDebug, eventId = Guid.Parse(error.ErrorId) };
+        var parameters = new { error.AppId, error.IsDebug, eventId = Guid.Parse(error.ErrorId),
+            issueId = IssueFingerprint.Create(error.ErrorType, error.ErrorMessage, error.StackTrace), error.Timestamp,
+            error.ErrorMessage, stackTrace = error.StackTrace ?? "", release = error.Release ?? "", environment = error.Environment ?? "",
+            platform = error.Platform ?? "", osName = error.OsName ?? "", osVersion = error.OsVersion ?? "", sdkVersion = error.SdkVersion ?? "",
+            severity = error.Severity ?? "", kind = error.Kind ?? "" };
         var inserted = await connection.ExecuteScalarAsync<int>(new CommandDefinition("""
-            INSERT INTO error_receipts (app_id, is_debug, event_id)
-            SELECT a.id, @IsDebug, @eventId FROM apps a JOIN users u ON u.id = a.owner_id
+            INSERT INTO error_receipts (app_id, is_debug, event_id, issue_id, timestamp, error_message, stack_trace,
+                release, environment, platform, os_name, os_version, sdk_version, severity, kind)
+            SELECT a.id, @IsDebug, @eventId, @issueId, @Timestamp, @ErrorMessage, @stackTrace,
+                @release, @environment, @platform, @osName, @osVersion, @sdkVersion, @severity, @kind
+            FROM apps a JOIN users u ON u.id = a.owner_id
             WHERE a.id = @AppId AND a.deleted_at IS NULL AND u.lock_reason IS NULL
             ON CONFLICT DO NOTHING RETURNING 1
             """, parameters, transaction, cancellationToken: cancellationToken));
@@ -108,7 +133,7 @@ public class IssueStore(IDbContext db) : IIssueStore
             ?? new IssueAccess(false, false);
     }
 
-    public async Task<IssuePage> List(string appId, bool isDebug, string status, int offset, int limit, CancellationToken cancellationToken, string q = "")
+    public async Task<IssuePage> List(string appId, bool isDebug, string status, int offset, int limit, CancellationToken cancellationToken, string q = "", string? environment = null, string? release = null)
     {
         await using var connection = db.Connection;
         await connection.OpenAsync(cancellationToken);
@@ -117,15 +142,43 @@ public class IssueStore(IDbContext db) : IIssueStore
             SELECT * FROM error_issues WHERE app_id = @appId AND is_debug = @isDebug
                 AND (@status = 'all' OR status = @status)
                 AND (@q = '' OR strpos(lower(error_type), lower(@q)) > 0 OR strpos(lower(error_message), lower(@q)) > 0)
+                AND ((@environment IS NULL AND @release IS NULL) OR EXISTS (
+                    SELECT 1 FROM error_receipts r WHERE r.app_id = error_issues.app_id AND r.is_debug = error_issues.is_debug
+                    AND r.issue_id = error_issues.id AND (@environment IS NULL OR r.environment = @environment)
+                    AND (@release IS NULL OR r.release = @release)))
                 ORDER BY last_seen DESC, id LIMIT @limit OFFSET @offset;
             SELECT COUNT(*) FROM error_issues WHERE app_id = @appId AND is_debug = @isDebug
                 AND (@status = 'all' OR status = @status)
-                AND (@q = '' OR strpos(lower(error_type), lower(@q)) > 0 OR strpos(lower(error_message), lower(@q)) > 0);
-            """, new { appId, isDebug, status, offset, limit, q }, transaction, cancellationToken: cancellationToken));
+                AND (@q = '' OR strpos(lower(error_type), lower(@q)) > 0 OR strpos(lower(error_message), lower(@q)) > 0)
+                AND ((@environment IS NULL AND @release IS NULL) OR EXISTS (
+                    SELECT 1 FROM error_receipts r WHERE r.app_id = error_issues.app_id AND r.is_debug = error_issues.is_debug
+                    AND r.issue_id = error_issues.id AND (@environment IS NULL OR r.environment = @environment)
+                    AND (@release IS NULL OR r.release = @release)));
+            """, new { appId, isDebug, status, offset, limit, q, environment, release }, transaction, cancellationToken: cancellationToken));
         var issues = (await result.ReadAsync<Issue>()).ToArray();
         var total = await result.ReadSingleAsync<long>();
         await transaction.CommitAsync(cancellationToken);
         return new IssuePage(issues, total);
+    }
+
+    public async Task<IssueEventPage> Events(string appId, bool isDebug, string id, int offset, int limit, CancellationToken cancellationToken, string? environment = null, string? release = null)
+    {
+        await using var connection = db.Connection;
+        await connection.OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead, cancellationToken);
+        const string where = """
+            app_id = @appId AND is_debug = @isDebug AND issue_id = @id AND timestamp IS NOT NULL
+            AND (@environment IS NULL OR environment = @environment) AND (@release IS NULL OR release = @release)
+            """;
+        using var rows = await connection.QueryMultipleAsync(new CommandDefinition($"""
+            SELECT event_id, timestamp, error_message, stack_trace, release, environment, platform, os_name, os_version, sdk_version, severity, kind
+            FROM error_receipts WHERE {where} ORDER BY timestamp DESC, event_id LIMIT @limit OFFSET @offset;
+            SELECT COUNT(*) FROM error_receipts WHERE {where};
+            """, new { appId, isDebug, id, offset, limit, environment, release }, transaction, cancellationToken: cancellationToken));
+        var events = (await rows.ReadAsync<IssueEvent>()).ToArray();
+        var total = await rows.ReadSingleAsync<long>();
+        await transaction.CommitAsync(cancellationToken);
+        return new IssueEventPage(events, total);
     }
 
     public async Task<Issue?> Get(string appId, bool isDebug, string id, CancellationToken cancellationToken)

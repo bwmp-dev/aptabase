@@ -138,6 +138,8 @@ public class IssueTrackingTests
             http.DefaultRequestHeaders.Add("Test-Owner", "true");
             var response = await http.GetAsync(route);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await http.GetAsync(route + "/events")).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await http.GetAsync(route + "/events?limit=101")).StatusCode);
             using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
             Assert.True(json.RootElement.GetProperty("canManage").GetBoolean());
             Assert.Equal(6, json.RootElement.GetProperty("issue").GetProperty("occurrenceCount").GetInt64());
@@ -153,6 +155,7 @@ public class IssueTrackingTests
             }, default);
             var transactionRoute = $"/api/v0/apps/issue-app-a/transactions/{eventId}";
             Assert.Equal(HttpStatusCode.OK, (await http.GetAsync(transactionRoute)).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await http.GetAsync("/api/v0/apps/issue-app-a/releases")).StatusCode);
             Assert.Equal(HttpStatusCode.OK, (await http.GetAsync("/api/v0/apps/issue-app-a/transactions")).StatusCode);
             Assert.Equal(HttpStatusCode.OK, (await http.GetAsync("/api/v0/apps/issue-app-a/performance/summary")).StatusCode);
             Assert.Equal(HttpStatusCode.BadRequest, (await http.GetAsync("/api/v0/apps/issue-app-a/transactions?limit=101")).StatusCode);
@@ -162,6 +165,8 @@ public class IssueTrackingTests
             Assert.Equal(HttpStatusCode.Unauthorized, (await http.GetAsync(transactionRoute)).StatusCode);
             http.DefaultRequestHeaders.Add("Test-Stranger", "true");
             Assert.Equal(HttpStatusCode.Forbidden, (await http.GetAsync(transactionRoute)).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await http.GetAsync(route + "/events")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await http.GetAsync("/api/v0/apps/issue-app-a/releases")).StatusCode);
             http.DefaultRequestHeaders.Remove("Test-Stranger");
             http.DefaultRequestHeaders.Add("Test-Reader", "true");
             Assert.Equal(HttpStatusCode.OK, (await http.GetAsync(transactionRoute)).StatusCode);

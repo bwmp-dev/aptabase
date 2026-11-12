@@ -33,9 +33,10 @@ The fork's LICENSE and attribution remain unchanged. Any future copied source re
 - [ ] Durable delivery to raw error storage. Current in-memory raw buffer can lose accepted events on crashes or sink failure; issue persistence alone is not exactly-once end-to-end delivery. Design outbox and downstream deduplication together for ClickHouse and Tinybird.
 
 ### 2. Triage context, environments and releases
-- [ ] Bounded sanitized event context/detail, latest/recent occurrences linked to issue; no request bodies, cookies, headers, user IDs or session identities by default.
-- [ ] Explicit environment and release labels; preserve debug/release build mode as a separate dimension. Filter by environment/release, type/severity and first/last seen; parameterized search.
-- [ ] Release catalog and issue appearance/regression indicators derived from received reports, not fabricated deployment metadata.
+- [x] Backend bounded sanitized event context/detail, latest/recent occurrences linked to issue; no request bodies, cookies, headers, user IDs or session identities by default.
+- [x] Backend explicit environment and release labels; preserve debug/release build mode as a separate dimension. Filter by environment/release, type/severity and first/last seen; parameterized search.
+- [x] Backend observed release/environment catalog from retained errors/transactions.
+- [ ] Release/context frontend and deeper release regression indicators.
 - [ ] Acceptance: same fingerprint across releases remains one issue; environment filter semantics documented; access checks on every detail/query; oversized/high-cardinality context rejected or bounded.
 
 ### 3. Sentry SDK intake subset
@@ -99,3 +100,11 @@ Baseline: 232 backend unit tests and one PostgreSQL/HTTP scenario passed; 14 fro
 - Passed: 248 backend unit tests and both expanded isolated PostgreSQL/HTTP scenarios. Performance ingestion deduplication, sanitizer, release filters, percentile fixture (100/200 ms => p50 150/p95 195), retention, HTTP read authorization and debug isolation verified.
 - A recurrence assertion initially depended on Docker/Windows clock agreement. The fixture now uses an explicit past resolution boundary; rerun passed. Production policy still compares normalized client event time to database resolution time, so clocks should be synchronized.
 - Contract and desktop/mobile instrumentation guidance: `docs/app-performance-api.md`. Frontend implementation delegated to Opus; not yet accepted. No performance load/scale claim.
+
+### Error context backend increment
+
+Retained occurrences now carry sanitized message/stack and allowlisted app/OS/SDK/severity/kind/release/environment fields, without session/user IDs. This supersedes the minimal receipt-only retention description above: detailed context now shares the 30-day receipt lifetime. Issue filters match retained occurrences but return lifetime aggregate counts; resolution remains app/build-wide across environments. Added paginated event detail and an observed release/environment catalog (not deployment history). Tests cover sanitized details, filters, lifetime group scope and HTTP authorization. Frontend integration pending.
+
+### Headless real-API test host
+
+`tests/MonitoringHost` is a standalone loopback-only executable, excluded from production registration. It requires an explicit isolated PostgreSQL connection, creates/drops its own database, serves built webapp files and terminates after 15 minutes. It uses real monitoring controllers and cookie authentication, with test-only login/bootstrap endpoints; no production auth or external email is used. Raw analytics sink reads are intentionally unsupported. Build and loopback health check passed. Browser assertions are delegated to Opus.

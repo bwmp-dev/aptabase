@@ -44,6 +44,7 @@ public class ErrorsController : ControllerBase
     [EnableRateLimiting("EventIngestion")]
     [ResolveErrorAppKey]
     [Route("/api/v0/error")]
+    [RequestSizeLimit(131072)]
     public async Task<IActionResult> PostError([FromBody] ErrorBody body, CancellationToken cancellationToken)
     {
         // Validate the error body
@@ -76,11 +77,13 @@ public class ErrorsController : ControllerBase
             ErrorMessage = sanitizedErrorMessage,
             ErrorType = _piiSanitizer.Sanitize(body.ErrorType),
             StackTrace = sanitizedStackTrace,
-            Platform = body.Platform,
-            OsName = body.OsName,
-            OsVersion = body.OsVersion,
-            AppVersion = body.AppVersion,
-            SdkVersion = body.SdkVersion,
+            Release = _piiSanitizer.Sanitize(body.Release ?? body.AppVersion),
+            Environment = _piiSanitizer.Sanitize(body.Environment),
+            Platform = _piiSanitizer.Sanitize(body.Platform),
+            OsName = _piiSanitizer.Sanitize(body.OsName),
+            OsVersion = _piiSanitizer.Sanitize(body.OsVersion),
+            AppVersion = _piiSanitizer.Sanitize(body.AppVersion),
+            SdkVersion = _piiSanitizer.Sanitize(body.SdkVersion),
             SessionId = body.SessionId,
             Severity = body.Severity,
             Kind = body.Kind,

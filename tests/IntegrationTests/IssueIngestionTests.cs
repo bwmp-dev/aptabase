@@ -79,7 +79,8 @@ public class IssueIngestionTests
             object Body(string? id, DateTime? timestamp = null, bool debug = false) => new
             {
                 eventId = id, errorType = "Type", errorMessage = "Failed for owner@example.test", stackTrace = "at App.Run()",
-                timestamp = timestamp ?? DateTime.UtcNow, isDebug = debug
+                timestamp = timestamp ?? DateTime.UtcNow, isDebug = debug, release = "1.2.0", environment = "production",
+                platform = "desktop", osName = "Windows", sdkVersion = "test", sessionId = "must-not-be-in-context"
             };
             http.DefaultRequestHeaders.Add("App-Key", "INVALID");
             Assert.Equal(HttpStatusCode.Unauthorized, (await http.PostAsync("/api/v0/error", new StringContent("malformed", System.Text.Encoding.UTF8, "application/json"))).StatusCode);
@@ -121,6 +122,16 @@ public class IssueIngestionTests
             Assert.Equal(0, (await store.List("app-a", false, "all", 0, 50, default, "%")).Total);
             Assert.Equal(0, (await store.List("app-a", false, "all", 0, 50, default, "' OR 1=1 --")).Total);
 
+            var events = await store.Events("app-a", false, issue.Id, 0, 50, default, "production", "1.2.0");
+            Assert.Equal(3, events.Total);
+            Assert.All(events.Events, e => {
+                Assert.Equal("1.2.0", e.Release);
+                Assert.Equal("Windows", e.OsName);
+                Assert.Equal("Failed for [EMAIL_REDACTED]", e.ErrorMessage);
+            });
+            Assert.Equal(0, (await store.Events("app-a", false, issue.Id, 0, 50, default, "staging")).Total);
+            Assert.Equal(1, (await store.List("app-a", false, "all", 0, 50, default, environment: "production", release: "1.2.0")).Total);
+            Assert.Equal(0, (await store.List("app-a", false, "all", 0, 50, default, release: "other")).Total);
             // A failure after receipt insertion and quota charging must roll back both.
             await connection.ExecuteAsync("ALTER TABLE error_issues ADD CONSTRAINT test_failure CHECK (occurrence_count < 2) NOT VALID");
             var beforeQuota = await connection.ExecuteScalarAsync<int>("SELECT error_count FROM apps WHERE id = 'app-b'");

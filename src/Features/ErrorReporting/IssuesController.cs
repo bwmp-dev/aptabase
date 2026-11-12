@@ -18,14 +18,14 @@ public class IssuesController(IIssueStore store) : ControllerBase
     [HttpGet]
     public async Task<IActionResult> List(string appId, [FromQuery] string buildMode = "release",
         [FromQuery] string status = "unresolved", [FromQuery] int offset = 0, [FromQuery] int limit = 50,
-        CancellationToken cancellationToken = default, [FromQuery] string? q = null)
+        CancellationToken cancellationToken = default, [FromQuery] string? q = null, [FromQuery] string? environment = null, [FromQuery] string? release = null)
     {
         var access = await store.GetAccess(appId, HttpContext.GetCurrentUserIdentity(), cancellationToken);
         if (!access.CanRead) return StatusCode(403);
         q = q?.Trim() ?? "";
-        if (q.Length > 200 || !ValidMode(buildMode) || status is not ("all" or "resolved" or "unresolved") || offset < 0 || limit < 1 || limit > 100)
+        if (environment?.Length > 50 || release?.Length > 100 || q.Length > 200 || !ValidMode(buildMode) || status is not ("all" or "resolved" or "unresolved") || offset < 0 || limit < 1 || limit > 100)
             return BadRequest(new { error = "Invalid issue query" });
-        var page = await store.List(appId, buildMode == "debug", status, offset, limit, cancellationToken, q);
+        var page = await store.List(appId, buildMode == "debug", status, offset, limit, cancellationToken, q, environment, release);
         return Ok(new { issues = page.Issues, pagination = new { offset, limit, total = page.Total }, canManage = access.CanManage });
     }
 
@@ -38,6 +38,20 @@ public class IssuesController(IIssueStore store) : ControllerBase
         if (!ValidMode(buildMode)) return BadRequest(new { error = "Invalid build mode" });
         var issue = await store.Get(appId, buildMode == "debug", issueId, cancellationToken);
         return issue is null ? NotFound() : Ok(new { issue, canManage = access.CanManage });
+    }
+
+    [HttpGet("{issueId}/events")]
+    public async Task<IActionResult> Events(string appId, string issueId, [FromQuery] string buildMode = "release",
+        [FromQuery] int offset = 0, [FromQuery] int limit = 50, [FromQuery] string? environment = null,
+        [FromQuery] string? release = null, CancellationToken cancellationToken = default)
+    {
+        var access = await store.GetAccess(appId, HttpContext.GetCurrentUserIdentity(), cancellationToken);
+        if (!access.CanRead) return StatusCode(403);
+        if (!ValidMode(buildMode) || offset < 0 || limit < 1 || limit > 100 || environment?.Length > 50 || release?.Length > 100)
+            return BadRequest(new { error = "Invalid event query" });
+        if (await store.Get(appId, buildMode == "debug", issueId, cancellationToken) is null) return NotFound();
+        var page = await store.Events(appId, buildMode == "debug", issueId, offset, limit, cancellationToken, environment, release);
+        return Ok(new { events = page.Events, pagination = new { offset, limit, total = page.Total } });
     }
 
     [HttpPatch("{issueId}")]
