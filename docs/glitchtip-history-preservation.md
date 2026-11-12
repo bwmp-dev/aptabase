@@ -1,4 +1,6 @@
-# Preserving GlitchTip history before retirement
+# Optional GlitchTip history preservation reference
+
+**Superseded as a retirement requirement on 2026-11-12.** The owner explicitly waived current GlitchTip history: “I don’t care about current glitchtip history what is needed from me”. The [controlling acceptance matrix](glitchtip-retirement-readiness.md) records the waiver and remaining path. The assessment below is retained only as optional reference, not work to perform or an outstanding gate. No deletion, export, access or service shutdown is authorized.
 
 Assessment date: 2026-11-12. Only public official documentation/source was inspected. The owner's deployed version, storage configuration and private data were **not accessed**. No export, importer, migration or service shutdown was executed. This plan complements [the retirement matrix](glitchtip-retirement-readiness.md); it does not certify a replacement.
 

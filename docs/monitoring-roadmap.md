@@ -1,5 +1,7 @@
 # Aptabase monitoring roadmap
 
+**Current owner scope (2026-11-12):** Current GlitchTip history is waived, with no deletion authorized. This supersedes historical archive/import requirements in earlier checkpoint entries below. See the quoted owner instruction and ordered minimal path in [the retirement matrix](glitchtip-retirement-readiness.md). New Aptabase data recovery and operational rollback still apply.
+
 Current phase: complete the one-login Windows monitoring acceptance slice after checkpoint `40e1e19`. Analytics, errors, performance, releases and symbol controls share Aptabase authentication/navigation and app ownership. The current production-auth integration scenario passes, and Sentry.NET6.8.0 preserves the synthetic method/basename/line353/column17 target. Sentry.Maui6.8.0 Windows compilation is verified; its actual runtime and published MultiShock integration are not. See `windows-monitoring-migration.md` for a safe migration plan and explicit replacement gates. Optional bounded ARM64 source-line/inlining is implemented independently; it is not Windows binary symbolication. Earlier ?final? sections below describe historical checkpoints, not blanket parity.
 
 Status: continuing SDK/native-readiness work after accepted checkpoint `7424a81` on `feat/error-issues`. The checkpoint ledger below is historical, not a declaration that all desktop/mobile monitoring work is finished. Owner-confirmed target: self-hosted desktop/mobile application errors and app performance. Website uptime, hosted SaaS expansion and billing features are out of scope. This is not a promise of full GlitchTip or Sentry parity. Existing Aptabase analytics, authentication, app ownership/sharing, ClickHouse and Tinybird support remain intact.
@@ -304,6 +306,14 @@ No frontend/JavaScript implementation changed; prior Opus114unit/46mocked/40real
 - [x] Twelve new coreSDK6.8 cases: HTTP status/cache semantics, transport exception replay, metadata consent boundaries, HTTP-loss counters, and a real-collector mixed unhandled/crashed-session replay with late-init and privacy assertions. Final SDK suite21/21,0failed/0skipped; no MAUI executable or substitute launcher.
 - [x] Actual HTTP500/503/429/403/413/422 responses discard the original in the testedSDK; transport failure retains it.500/503 yield later `send_error` counters; tested429 backoff losses do not. Error-only opt-out still emits sessions/client reports. These are documented cutover risks, not silently changed behavior.
 - [x] Corrected stale migration/session-support documentation and recorded the single authorized-but-denied launch retry. No production/frontend implementation changed; previous346unit/81integration and frontend results retained without reruns.
-- [ ] Runtime review/environment, exact full-app candidate and consent/delivery policy, authorized deployed hosting checks, private GlitchTip archive restore and history-access decision remain required. Further speculative parity work does not close these gates.
+- [ ] Runtime review/environment, exact full-app candidate and consent/delivery policy, authorized deployed hosting checks and explicit cutover/retirement approval remain required. Old GlitchTip history is waived; further speculative parity work does not close these gates.
 
 See `sentry68-delivery-acceptance.md` for exact evidence/source references. Task-owned alternate-port collector/database removed after testing; manual ports and original app/live service untouched.
+
+## Owner history waiver and minimal path (2026-11-12)
+
+- [x] Recorded trusted owner instruction: “I don’t care about current glitchtip history what is needed from me”. Removed history export/import/preservation/archive restore from current retirement gates, without deleting anything.
+- [x] Reconciled controlling readiness, migration, production-acceptance and optional history-reference docs. Earlier checkpoint history requirements above are superseded, not pending work.
+- [ ] Next answers: hosting destination/existing services and whole-SDK opt-out/cache policy. Next actions: user-operated blocked runtime checks and exact authorized MultiShock candidate/dependency. Later approvals: staging/deployment, cutover/rollback and service retirement. See the ordered matrix; no denied-launch retry or live action is authorized.
+
+Documentation-only change; no tests rerun, no executable/configuration/frontend edits and no services started. Existing test evidence is unchanged.
