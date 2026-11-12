@@ -68,7 +68,7 @@ public class IssueStore(IDbContext db) : IIssueStore
             """, new { error.AppId }, transaction, cancellationToken: cancellationToken));
         if (policy is null || !policy.CaptureErrors) return IssueRecordResult.AppUnavailable;
         var parameters = new { error.AppId, error.IsDebug, eventId = Guid.Parse(error.ErrorId),
-            issueId = IssueFingerprint.Create(error.ErrorType, error.ErrorMessage, error.StackTrace), error.Timestamp,
+            issueId = IssueFingerprint.Create(error.ErrorType, error.ErrorMessage, error.GroupingStackTrace ?? error.StackTrace), error.Timestamp,
             error.ErrorMessage, stackTrace = error.StackTrace ?? "", release = error.Release ?? "", environment = error.Environment ?? "",
             platform = error.Platform ?? "", osName = error.OsName ?? "", osVersion = error.OsVersion ?? "", sdkVersion = error.SdkVersion ?? "",
             severity = error.Severity ?? "", kind = error.Kind ?? "" };
@@ -114,7 +114,7 @@ public class IssueStore(IDbContext db) : IIssueStore
             RETURNING CASE WHEN occurrence_count = 1 THEN 'new_issue'
                 WHEN last_reopened_event_id = @eventId THEN 'regression' ELSE NULL END
             """, new { error.AppId, error.IsDebug, eventId = Guid.Parse(error.ErrorId),
-                id = IssueFingerprint.Create(error.ErrorType, error.ErrorMessage, error.StackTrace),
+                id = IssueFingerprint.Create(error.ErrorType, error.ErrorMessage, error.GroupingStackTrace ?? error.StackTrace),
                 error.ErrorType, error.ErrorMessage, stack = error.StackTrace ?? "", error.Timestamp },
             transaction, cancellationToken: cancellationToken));
         if (policy.ForwardRawErrors) await connection.ExecuteAsync(new CommandDefinition("""

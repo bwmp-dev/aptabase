@@ -59,18 +59,28 @@ public static class SentryEnvelopeParser
         var last = values.LastOrDefault();
         var frames = Array(Object(last, "stacktrace"), "frames");
         if (frames.Length > 100) throw new FormatException("Too many stack frames");
-        var lines = frames.Select(frame => {
+        var groupingLines = frames.Select(frame => {
+            if (Text(frame, "instruction_addr") is not null && string.IsNullOrWhiteSpace(Text(frame, "function")))
+                throw new UnsupportedSentryItemException();
             // Retain function names and basenames, never absolute source paths or source code/locals.
             var file = Text(frame, "filename") ?? "";
             file = file.Replace('\\', '/').Split('/').Last().Split('?')[0].Split('#')[0];
             return $"at {Text(frame, "function") ?? "<unknown>"} ({file})";
+        }).ToArray();
+        var lines = frames.Select((frame, index) => {
+            var line = PositiveInteger(frame, "lineno");
+            var column = PositiveInteger(frame, "colno");
+            return groupingLines[index] + (line is null ? "" : $" line {line}" + (column is null ? "" : $":{column}"));
         });
+        var handled = Boolean(Object(last, "mechanism"), "handled");
         return new ErrorBody {
             EventId = id, Timestamp = Time(body, "timestamp", required: false),
             ErrorType = Text(last, "type") ?? "Message",
             ErrorMessage = Text(last, "value") ?? Text(body, "message") ?? Text(Object(body, "logentry"), "formatted") ?? Text(Object(body, "logentry"), "message") ?? "Error",
-            StackTrace = string.Join("\n", lines), Release = Text(body, "release"), Environment = Text(body, "environment"),
-            Platform = Text(body, "platform"), Severity = Text(body, "level") == "fatal" ? "fatal" : "error", Kind = "handled",
+            StackTrace = string.Join("\n", lines), GroupingStackTrace = string.Join("\n", groupingLines),
+            Release = Text(body, "release"), Environment = Text(body, "environment"),
+            Platform = Text(body, "platform"), Severity = Text(body, "level") == "fatal" ? "fatal" : "error",
+            Kind = handled is false ? "unhandled" : "handled",
             SdkVersion = Text(Object(body, "sdk"), "version"), OsName = Text(Object(Object(body, "contexts"), "os"), "name"),
             OsVersion = Text(Object(Object(body, "contexts"), "os"), "version")
         };
@@ -103,6 +113,19 @@ public static class SentryEnvelopeParser
     }
 
     private static string Status(JsonElement value) => Text(value, "status") switch { null or "ok" => "ok", "cancelled" => "cancelled", _ => "error" };
+    private static bool? Boolean(JsonElement obj, string name)
+    {
+        if (obj.ValueKind == JsonValueKind.Undefined || !obj.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null) return null;
+        if (value.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw new FormatException("Expected boolean field");
+        return value.GetBoolean();
+    }
+    private static int? PositiveInteger(JsonElement obj, string name)
+    {
+        if (!obj.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null) return null;
+        if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out var number)) throw new FormatException("Expected integer location");
+        // JVM native/unknown locations can be negative; they provide no source position.
+        return number > 0 ? number : null;
+    }
     private static JsonElement ParseObject(ReadOnlyMemory<byte> data)
     {
         using var document = JsonDocument.Parse(data, new JsonDocumentOptions { MaxDepth = 32 });

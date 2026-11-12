@@ -29,6 +29,10 @@ dotnet run --project samples/DotNetMonitoring
 
 The sample sends nothing unless `--send` is supplied. For an explicitly authorized local collector test, set `APTABASE_COLLECTOR_URL` and `APTABASE_APP_KEY` in the process environment, then run with `--send`. Do not commit or print the key. This example demonstrates stable retry identity and bounded backoff; it is not a packaged mobile SDK or a durable device-side queue. No physical desktop/mobile device acceptance has been performed.
 
+## JVM and native-toolchain evidence
+
+The real Sentry Java 8.64.0 SDK now has a repeatable Windows/JVM acceptance probe for managed exceptions, actual uncaught process termination and app transactions/spans. See `sdk-native-assessment.md` for its privacy settings and required shutdown flush. This is useful for JVM desktop applications; it is not Android lifecycle/ANR/NDK acceptance. The installed Android NDK also passes an offline ARM64 symbol-resolution probe, but the collector has no symbol-upload or native-dump endpoint. Native/source-map architecture and owner decisions remain open in that assessment.
+
 ## Error reports
 
 Use `POST /api/v0/error` with the App-Key header and JSON containing `eventId`, `errorType`, `errorMessage`, optional `stackTrace`, `timestamp`, `release` (falls back to `appVersion`), `environment`, `platform`, OS/SDK versions, `severity`, `kind`, and `isDebug`. See `error-api-openapi.yaml` for bounds and semantics. Send structured diagnostic labels only; no user/session IDs are needed for issue tracking.
@@ -45,4 +49,4 @@ Allowlist diagnostic fields at the source. Regex redaction catches common identi
 
 ## Acceptance boundaries
 
-Native HTTP, PostgreSQL storage, validation, authorization, retry behavior and synthetic performance aggregates are tested locally. Actual Sentry .NET 6.10.0 exception/transaction envelopes are verified through SDK serialization, compression and authentication to a local TestServer/database. Other SDK/platform versions, native crash handling, offline mobile queues, source symbolication, physical-device energy overhead and production load are unverified. See `monitoring-roadmap.md` for remaining work.
+Native HTTP, PostgreSQL storage, validation, authorization, retry behavior and synthetic performance aggregates are tested locally. Actual Sentry .NET 6.10.0 exception/transaction envelopes are verified through SDK serialization, compression and authentication to a local TestServer/database; Java 8.64.0 is verified through a loopback HTTP collector. Managed source line/column positions are retained without altering the previous grouping input. Other SDK/platform versions, native crash handling, offline mobile queues, server source symbolication, physical-device energy overhead and production load are unverified. See `monitoring-roadmap.md` for remaining work.

@@ -361,6 +361,14 @@ public class IssueIngestionTests
         var before = await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts");
         Assert.Equal(HttpStatusCode.UnprocessableEntity, (await Send(Envelope(extra: "{\"type\":\"attachment\"}\nprivate"))).StatusCode);
         Assert.Equal(before, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts"));
+        var unresolvedNative = JsonSerializer.Serialize(new { dsn }) + "\n{\"type\":\"event\"}\n" + JsonSerializer.Serialize(new {
+            event_id = Guid.NewGuid().ToString("N"), platform = "native",
+            exception = new { values = new[] { new { type = "SIGSEGV", value = "test",
+                stacktrace = new { frames = new[] { new { instruction_addr = "0x1234" } } }
+            } } }
+        });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, (await Send(unresolvedNative)).StatusCode);
+        Assert.Equal(before, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts"));
         Assert.Equal(HttpStatusCode.UnprocessableEntity, (await Send(Envelope("session"))).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await Send(Envelope(), "?sentry_key=KEY-A")).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await Send("{}\n{\"type\":\"event\",\"length\":\"wrong\"}\n{}" )).StatusCode);
@@ -372,6 +380,22 @@ public class IssueIngestionTests
         Assert.DoesNotContain("must-not-store", retained);
         Assert.DoesNotContain("discard@example.test", retained);
         Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts WHERE app_id='app-a' AND event_id=@id", new { id = Guid.Parse(eventId) }));
+        var stableIssueId = IssueFingerprint.Create("LocationFailure", "location probe", "at Run (App.cs)");
+        foreach (var line in new[] { 42, 99 })
+        {
+            var locationId = Guid.NewGuid();
+            var locationPayload = JsonSerializer.Serialize(new { event_id = locationId.ToString("N"),
+                exception = new { values = new[] { new { type = "LocationFailure", value = "location probe",
+                    mechanism = new { handled = false }, stacktrace = new { frames = new[] {
+                        new { function = "Run", filename = "C:/private/App.cs", lineno = line, colno = 7 }
+                    } } } } } });
+            Assert.Equal(HttpStatusCode.OK, (await Send(JsonSerializer.Serialize(new { dsn }) + "\n{\"type\":\"event\"}\n" + locationPayload)).StatusCode);
+            var occurrence = await connection.QuerySingleAsync<IssueEvent>("SELECT * FROM error_receipts WHERE event_id=@id", new { id = locationId });
+            Assert.Equal($"at Run (App.cs) line {line}:7", occurrence.StackTrace);
+            Assert.Equal("unhandled", occurrence.Kind);
+            Assert.Equal(stableIssueId, await connection.ExecuteScalarAsync<string>("SELECT issue_id FROM error_receipts WHERE event_id=@id", new { id = locationId }));
+        }
+        Assert.Equal(2, await connection.ExecuteScalarAsync<int>("SELECT occurrence_count FROM error_issues WHERE id=@id AND app_id='app-b'", new { id = stableIssueId }));
         var transactionId = Guid.NewGuid().ToString("N");
         var payload = JsonSerializer.Serialize(new { event_id = transactionId, type = "transaction", transaction = "app.startup", start_timestamp = 1800000000.0, timestamp = 1800000000.5,
             contexts = new { trace = new { span_id = "1111111111111111", op = "ui.load", status = "ok" } },
@@ -403,7 +427,8 @@ public class IssueIngestionTests
             options.CreateHttpMessageHandler = () => new SdkResponseHandler(server.CreateHandler(), sdkResponses);
         }))
         {
-            global::Sentry.SentrySdk.CaptureException(new InvalidOperationException("SDK test owner@example.test"));
+            try { throw new InvalidOperationException("SDK test owner@example.test"); }
+            catch (InvalidOperationException error) { global::Sentry.SentrySdk.CaptureException(error); }
             var transaction = global::Sentry.SentrySdk.StartTransaction("sdk.startup", "ui.load");
             var span = transaction.StartChild("file.read");
             span.Finish();
@@ -413,6 +438,9 @@ public class IssueIngestionTests
         Assert.Equal(2, sdkResponses.Count);
         Assert.All(sdkResponses, status => Assert.Equal(HttpStatusCode.OK, status));
         Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts WHERE release='sdk-probe-6.10.0'"));
+        var sdkStack = await connection.ExecuteScalarAsync<string>("SELECT stack_trace FROM error_receipts WHERE release='sdk-probe-6.10.0'");
+        Assert.Contains("IssueIngestionTests.cs) line ", sdkStack);
+        Assert.DoesNotContain("D:\\", sdkStack);
         Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM app_transactions WHERE release='sdk-probe-6.10.0'"));
         await connection.ExecuteAsync("UPDATE apps SET capture_errors=false,capture_performance=false WHERE id='app-b'");
         Assert.Equal(HttpStatusCode.Forbidden, (await Send(Envelope())).StatusCode);

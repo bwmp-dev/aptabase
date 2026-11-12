@@ -64,4 +64,19 @@ public class TransactionBodyTests
         Assert.False(new PerformanceQuery { BuildMode = "other" }.TryFilter("app", out _));
         Assert.False(new PerformanceQuery { Limit = 101 }.TryFilter("app", out _));
     }
+
+    [Fact]
+    public void Accepts_Fractional_Spans_Ending_Exactly_At_Parent_Boundary()
+    {
+        var body = Valid(); body.DurationMs = 0.3;
+        body.Spans = new() {
+            new() { SpanId = "1111111111111111", Name = "parent", Operation = "app", DurationMs = 0.3 },
+            new() { SpanId = "2222222222222222", ParentSpanId = "1111111111111111", Name = "child", Operation = "app", StartOffsetMs = 0.1, DurationMs = 0.2 }
+        };
+        Assert.True(body.IsValid());
+        body.Spans[1].DurationMs = 0.200001;
+        Assert.False(body.IsValid());
+        body.DurationMs = 1;
+        Assert.False(body.IsValid());
+    }
 }

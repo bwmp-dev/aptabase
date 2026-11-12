@@ -1,6 +1,6 @@
 # Aptabase monitoring roadmap
 
-Status: scoped local implementation accepted on `feat/error-issues`; see final acceptance below. This does not imply production readiness, native crash support or universal SDK parity. Owner-confirmed target: self-hosted desktop/mobile application errors and app performance. Website uptime, hosted SaaS expansion and billing features are out of scope. This is not a promise of full GlitchTip or Sentry parity. Existing Aptabase analytics, authentication, app ownership/sharing, ClickHouse and Tinybird support remain intact.
+Status: continuing SDK/native-readiness work after accepted checkpoint `7424a81` on `feat/error-issues`. The checkpoint ledger below is historical, not a declaration that all desktop/mobile monitoring work is finished. Owner-confirmed target: self-hosted desktop/mobile application errors and app performance. Website uptime, hosted SaaS expansion and billing features are out of scope. This is not a promise of full GlitchTip or Sentry parity. Existing Aptabase analytics, authentication, app ownership/sharing, ClickHouse and Tinybird support remain intact.
 
 ## Assessment (2026-11-11)
 
@@ -79,13 +79,35 @@ Remaining input useful but not blocking independent work:
 - First desktop/mobile SDK languages to prioritize; initial examples can cover .NET and generic HTTP. Sentry compatibility remains a tested subset, not universal.
 - Expected event/trace volumes and disk budget; local PostgreSQL is the initial self-hosted choice, not a scalability claim.
 - Whether alert delivery is wanted and which channels; rule processing can be tested locally, but real delivery requires explicit authorization.
-- Source maps/native symbolication, attachments and crash dumps remain separate large projects and are not included in this initial scope.
+- Source maps/native symbolication, attachments and crash dumps remain unimplemented follow-on work requiring explicit storage, privacy, parser-isolation and format decisions. See `sdk-native-assessment.md`; do not treat the initial checkpoint's exclusions as closure of this work.
 
 ## Working policy
 
 Backend: GPT-6 Astra high. All frontend code: Claude Opus 5.5 high via T3. Local commits only; no pushes, PRs, deployments, visible windows or focus changes. Run one bounded test/build job at a time. Any headless listener must bind loopback and be stopped after tests. No real alerts, external services or permission changes.
 
-## Historical verification ledger (superseded by final acceptance below)
+## SDK/native readiness continuation after 7424a81
+
+- [x] Inspect installed SDK/toolchains without launching device/UI or installing major tooling. Details and architecture decisions: `sdk-native-assessment.md`.
+- [x] Preserve managed source line/column positions and unhandled mechanism status; keep previous grouping IDs and discard private context. Verify a truly thrown .NET exception with source locations.
+- [x] Add a pinned real JVM SDK probe: handled exception, actual uncaught process exit, transaction/span, stored privacy/context assertions through loopback HTTP/PostgreSQL.
+- [x] Correct fractional span end-boundary comparisons, with a regression failing before the fix and rejecting real overruns afterward.
+- [x] Reject unresolved native address frames before writes; continue rejecting binary/unsupported envelope items.
+- [x] Demonstrate installed NDK ARM64 DWARF symbol resolution offline without accepting arbitrary binaries or claiming collector support.
+- [ ] Extend real JavaScript SDK/source-map evidence on the available Node runtime. Use Opus 5.5 high for JavaScript app/frontend work; no UI or external telemetry.
+- [ ] Choose initial server symbolication formats, artifact storage/retention, isolated worker and license. Owner asked about text reports plus owner-uploaded symbols first versus dump assessment or SDK-side-only diagnostics. No response presumed; this is a product/architecture decision, not an access denial.
+- [ ] Implement and verify the selected artifact/symbolication phase only after those decisions are concrete. Current APIs intentionally do not accept artifacts/minidumps.
+- [ ] Physical Android/iOS, native crashes, R8/AOT/trimming, offline-device durability and resource overhead remain open platform acceptance, not passed by desktop JVM or offline compiler tests.
+
+### Continuation verification ledger
+
+- `dotnet test tests/UnitTests --no-restore -m:1`: **280 passed, 0 failed, 0 skipped**.
+- Focused PostgreSQL/HTTP tests: **2 passed**. Subsequently reran the **entire integration suite: 74 passed, 0 failed, 0 skipped**, 19 seconds, sequential with isolated PostgreSQL16, ClickHouse26.8.36.3 and local MailCatcher0.8.2. TRX: `%TEMP%/aptabase-sdk-acceptance/sdk-integration.trx`.
+- `tests/SdkProbes/Java/run.ps1`: passed handled exception, actual uncaught JVM termination and transaction/span acceptance with Sentry Java8.64.0/Java25. It initially failed uncaught delivery with the shutdown integration removed; retaining the bounded shutdown flush fixed it. One short transaction was rejected during exploration; a deterministic fractional-boundary regression was reproduced/fixed and the actual SDK probe reran successfully. The failed transaction's exact envelope was not captured, so the observed rejection is not asserted to have a proven unique cause.
+- `tests/SdkProbes/Native/run.ps1`: passed local Android ARM64 object symbol/function/source-line resolution with NDK29/LLVM21. A PowerShell native-argument quoting warning was corrected and the probe reran without it.
+- A first MonitoringHost launch omitted its absolute webroot and exited before database creation; restarted with `MONITORING_TEST_WEBROOT` pointing at the existing production bundle. No frontend code changed in this increment; previous 62 unit/26 fixture/24 real acceptance evidence remains historical, not a rerun. No frontend typecheck/build was needed for these backend/test-only changes.
+- Existing NU1902/NU1903 package advisories remain. No production deployment, mobile simulator/device, native crash dump, server symbolication, hosted Tinybird or load test was run. No real external alerts exist or were enabled.
+
+## Historical verification ledger (superseded by checkpoint acceptance below)
 
 Baseline: 232 backend unit tests and one PostgreSQL/HTTP scenario passed; 14 frontend tests, TypeScript and Vite build passed. Full historical integration suite and browser-to-real-backend checks were not run. Existing NuGet vulnerability warnings and React Doctor findings remain outside monitoring scope. Record subsequent exact commands/results here as phases progress; unchecked items are not complete.
 

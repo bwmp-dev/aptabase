@@ -13,6 +13,9 @@ public class ErrorBody
     public string? ErrorMessage { get; set; }
     public string? ErrorType { get; set; }
     public string? StackTrace { get; set; }
+    // Adapter-only grouping input preserves existing issue IDs as diagnostic locations improve.
+    [System.Text.Json.Serialization.JsonIgnore]
+    internal string? GroupingStackTrace { get; set; }
     public DateTime? Timestamp { get; set; }
     public string? Platform { get; set; }
     public string? OsName { get; set; }

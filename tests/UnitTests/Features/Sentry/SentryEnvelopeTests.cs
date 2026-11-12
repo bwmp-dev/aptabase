@@ -44,6 +44,60 @@ public class SentryEnvelopeTests
     public void Rejects_Unsupported_Item_Types(string type) => Assert.Throws<UnsupportedSentryItemException>(() => SentryEnvelopeParser.Parse(Envelope(new {}, type)));
 
     [Theory]
+    [InlineData(true, "handled")]
+    [InlineData(false, "unhandled")]
+    [InlineData(null, "handled")]
+    public void Maps_Managed_Mechanism_And_Source_Position_Without_Private_Context(bool? handled, string kind)
+    {
+        var value = SentryEnvelopeParser.Parse(Envelope(new {
+            exception = new { values = new[] { new { type = "Failure", value = "test",
+                mechanism = new { handled, data = new { secret = "private" } },
+                stacktrace = new { frames = new[] { new { filename = "/home/private/App.cs", function = "Run",
+                    lineno = 42, colno = 7, context_line = "private source", vars = new { token = "private" } } } }
+            } } }
+        }));
+        Assert.Equal(kind, value.Error!.Kind);
+        Assert.Equal("at Run (App.cs) line 42:7", value.Error.StackTrace);
+        var json = JsonSerializer.Serialize(value.Error);
+        Assert.DoesNotContain("GroupingStackTrace", json);
+        Assert.DoesNotContain("private", json);
+    }
+
+    [Theory]
+    [InlineData(-2)]
+    [InlineData(0)]
+    public void Omits_Unknown_Jvm_Locations(int line)
+    {
+        var value = SentryEnvelopeParser.Parse(Envelope(new {
+            exception = new { values = new[] { new { type = "Failure", value = "test",
+                stacktrace = new { frames = new[] { new { function = "Run", lineno = line } } }
+            } } }
+        }));
+        Assert.Equal("at Run ()", value.Error!.StackTrace);
+    }
+
+    [Theory]
+    [InlineData("{\"handled\":\"false\"}", "{}")]
+    [InlineData("{}", "{\"lineno\":1.5}")]
+    [InlineData("{}", "{\"colno\":\"7\"}")]
+    public void Rejects_Malformed_Diagnostic_Fields(string mechanism, string frame)
+    {
+        using var payload = JsonDocument.Parse("{\"exception\":{\"values\":[{\"type\":\"Error\",\"value\":\"test\",\"mechanism\":" + mechanism +
+            ",\"stacktrace\":{\"frames\":[" + frame + "]}}]}}");
+        Assert.Throws<FormatException>(() => SentryEnvelopeParser.Parse(Envelope(payload.RootElement)));
+    }
+
+    [Fact]
+    public void Rejects_Unresolved_Native_Addresses_Instead_Of_Grouping_Unknown_Frames()
+    {
+        Assert.Throws<UnsupportedSentryItemException>(() => SentryEnvelopeParser.Parse(Envelope(new {
+            platform = "native", exception = new { values = new[] { new { type = "SIGSEGV", value = "test",
+                stacktrace = new { frames = new[] { new { filename = "libapp.so", instruction_addr = "0x1234" } } }
+            } } }
+        })));
+    }
+
+    [Theory]
     [InlineData("{\"type\":\"event\",\"length\":\"bad\"}")]
     [InlineData("{\"type\":\"event\",\"length\":-1}")]
     [InlineData("{\"type\":\"event\",\"length\":9999}")]

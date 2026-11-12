@@ -8,6 +8,8 @@ public readonly struct TrackingError
     public required string ErrorMessage { get; init; }
     public required string ErrorType { get; init; }
     public string? StackTrace { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    internal string? GroupingStackTrace { get; init; }
     public string? Platform { get; init; }
     public string? OsName { get; init; }
     public string? OsVersion { get; init; }
