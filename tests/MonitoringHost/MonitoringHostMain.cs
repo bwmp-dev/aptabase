@@ -117,8 +117,8 @@ public static class MonitoringHostMain
             app.MapGet("/api/_app-requests", (HttpContext c) => c.IsAuthenticated() ? Results.Ok(Array.Empty<object>()) : Results.Unauthorized());
             app.MapGet("/test/avatar.svg", () => Results.Text("<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><rect width='32' height='32' fill='#888'/></svg>", "image/svg+xml"));
             app.MapFallbackToFile("index.html");
-            using var lifetime = new CancellationTokenSource(TimeSpan.FromMinutes(15));
-            Console.WriteLine("Monitoring test host: http://127.0.0.1:55440 (15 minute maximum lifetime)");
+            using var lifetime = new CancellationTokenSource(TimeSpan.FromMinutes(45));
+            Console.WriteLine("Monitoring test host: http://127.0.0.1:55440 (45 minute maximum lifetime)");
             await app.RunAsync(lifetime.Token);
         }
         finally { await admin.ExecuteAsync($"DROP DATABASE {database} WITH (FORCE)"); }

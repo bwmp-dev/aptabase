@@ -111,7 +111,7 @@ Retained occurrences now carry sanitized message/stack and allowlisted app/OS/SD
 
 ### Headless real-API test host
 
-`tests/MonitoringHost` is a standalone loopback-only executable, excluded from production registration. It requires an explicit isolated PostgreSQL connection, creates/drops its own database, serves built webapp files and terminates after 15 minutes. It uses real monitoring controllers and cookie authentication, with test-only login/bootstrap endpoints; no production auth or external email is used. Raw analytics sink reads are intentionally unsupported. Build and loopback health check passed. Browser assertions are delegated to Opus.
+`tests/MonitoringHost` is a standalone loopback-only executable, excluded from production registration. It requires an explicit isolated PostgreSQL connection, creates/drops its own database, serves built webapp files and terminates after 45 minutes (extended from 15 to avoid interrupting the combined headless acceptance suite). It uses real monitoring controllers and cookie authentication, with test-only login/bootstrap endpoints; no production auth or external email is used. Raw analytics sink reads are intentionally unsupported. Build and loopback health check passed. Browser assertions are delegated to Opus.
 
 ### Durable raw delivery increment
 
