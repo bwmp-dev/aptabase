@@ -11,11 +11,13 @@ public sealed class StorageReadinessCheck(IDbContext db, EnvSettings env) : IHea
     {
         try
         {
-            await using var connection = db.Connection;
+            await using var source = (NpgsqlConnection)db.Connection;
             // Npgsql can defer cancellation while connecting/authenticating; bound that phase independently.
-            connection.ConnectionString = new NpgsqlConnectionStringBuilder(connection.ConnectionString) {
+            var settings = new NpgsqlConnectionStringBuilder(source.ConnectionString) {
                 Timeout = 2, CommandTimeout = 2, CancellationTimeout = 500, Pooling = false
-            }.ConnectionString;
+            };
+            // A data source redacts its password; cloning preserves authentication and TLS callbacks.
+            await using var connection = await source.CloneWithAsync(settings.ConnectionString, cancellationToken);
             await connection.OpenAsync(cancellationToken);
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT 1";

@@ -23,6 +23,20 @@ public class ProductionConfigurationCollection;
 public class ProductionAcceptanceTests
 {
     [Fact]
+    public async Task Readiness_Preserves_DataSource_Authentication_When_Bounding_Connection_Timeouts()
+    {
+        var url = Environment.GetEnvironmentVariable("APTABASE_ISSUE_TEST_DATABASE_URL")
+            ?? throw new InvalidOperationException("Isolated PostgreSQL required");
+        var settings = new NpgsqlConnectionStringBuilder(url) { PersistSecurityInfo = false };
+        await using var source = NpgsqlDataSource.Create(settings.ConnectionString);
+        await using var original = source.CreateConnection();
+        Assert.Null(new NpgsqlConnectionStringBuilder(original.ConnectionString).Password);
+        var check = new Aptabase.Features.Monitoring.StorageReadinessCheck(new DbContext(source), (EnvSettings)Activator.CreateInstance(typeof(EnvSettings), nonPublic: true)!);
+        var result = await check.CheckHealthAsync(new Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckContext());
+        Assert.Equal(Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Healthy, result.Status);
+    }
+
+    [Fact]
     public async Task Production_Login_Keys_Headers_And_Storage_Readiness_Survive_Restart()
     {
         var adminUrl = Environment.GetEnvironmentVariable("APTABASE_ISSUE_TEST_DATABASE_URL")
