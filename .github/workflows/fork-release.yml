@@ -52,6 +52,9 @@ jobs:
           image="ghcr.io/bwmp-dev/aptabase:sha-$GITHUB_SHA-amd64"
           docker tag aptabase:amd64 "$image"
           docker push "$image"
-          digest=$(docker image inspect "$image" --format '{{index .RepoDigests 0}}')
-          [[ "$digest" == ghcr.io/bwmp-dev/aptabase@sha256:* ]]
+          digest=$(docker image inspect "$image" | jq -er --arg repository "ghcr.io/bwmp-dev/aptabase" '
+            .[0].RepoDigests | map(select(startswith($repository + "@"))) |
+            if length == 1 and (.[0] | ltrimstr($repository + "@") | test("^sha256:[0-9a-f]{64}$"))
+            then .[0] else error("Expected exactly one valid destination repository digest") end
+          ')
           printf 'Deploy only by digest: `%s`\n' "$digest" >> "$GITHUB_STEP_SUMMARY"
