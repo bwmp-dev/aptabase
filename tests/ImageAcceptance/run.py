@@ -36,6 +36,22 @@ def docker(*args):
         raise RuntimeError('Docker operation failed: ' + result.stderr[-500:])
     return result.stdout.strip()
 
+def key_fingerprints(container):
+    # Hash as the application's existing container identity; never export key contents or widen permissions.
+    obj = json.loads(docker('inspect', container))[0]
+    assert (container, obj['Id']) in resources
+    assert obj['Config']['Labels'].get('aptabase.image-test') == run
+    output = docker('exec', container, 'sh', '-c', 'sha256sum /keys/*.xml')
+    fingerprints = {}
+    for line in output.splitlines():
+        match = re.fullmatch(r'([0-9a-f]{64})  (/keys/key-[0-9a-f-]{36}\.xml)', line)
+        assert match, 'Unexpected key digest output'
+        assert match[2] not in fingerprints
+        fingerprints[match[2]] = match[1]
+    assert fingerprints, 'No persisted data protection keys'
+    return fingerprints
+
+
 def passed(name):
     checks.append(name)
     print('PASS:', name, flush=True)
@@ -198,7 +214,7 @@ proxy_set_header X-Forwarded-Proto https; proxy_set_header X-Forwarded-For $remo
         assert issues['pagination']['total']==1 and issues['issues'][0]['occurrenceCount']==1
         assert 'Synthetic.Throw (Synthetic.cs) line 353:17' in issues['issues'][0]['stackTrace']
         passed('HTTPS DSN, synthetic error ingestion/retry dedup and authenticated issue access')
-        key_files = {p.name: p.read_bytes() for p in (root/'keys').glob('*.xml')}
+        key_files = key_fingerprints(app)
         assert key_files
         old_resource = next(item for item in resources if item[0] == app)
         old_container = json.loads(docker('inspect', app))[0]
@@ -216,7 +232,7 @@ proxy_set_header X-Forwarded-Proto https; proxy_set_header X-Forwarded-For $remo
             except (OSError, urllib.error.URLError): pass
             time.sleep(1)
         else: raise AssertionError('Persisted login not accepted after container replacement')
-        assert all((root/'keys'/name).read_bytes() == data for name, data in key_files.items())
+        assert key_fingerprints(app) == key_files
         assert request(anonymous, endpoint, wire, raw=True)[0] == 200
         issues = json.loads(request(owner, f'/api/v0/apps/{appid}/issues')[2])
         assert issues['pagination']['total']==1 and issues['issues'][0]['occurrenceCount']==1

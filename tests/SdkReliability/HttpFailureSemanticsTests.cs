@@ -8,28 +8,45 @@ using Xunit;
 public class HttpFailureSemanticsTests
 {
     [Theory]
-    [InlineData(500, true)]
-    [InlineData(503, true)]
-    [InlineData(429, false)]
-    public async Task Http_Loss_Reports_And_RetryAfter_Suppression_Follow_Actual_Sdk_Semantics(int status, bool reportsLoss)
+    [InlineData(500, true, false)]
+    [InlineData(500, true, true)]
+    [InlineData(503, true, false)]
+    [InlineData(503, true, true)]
+    [InlineData(429, false, false)]
+    public async Task Http_Loss_Reports_And_RetryAfter_Suppression_Follow_Actual_Sdk_Semantics(int status, bool reportsLoss, bool rejectFirstReport)
     {
         using var cache = new TestCache();
-        var handler = new ResponseHandler(status);
+        var handler = new ResponseHandler(status) { RejectFirstReport = rejectFirstReport };
+        SentryId rejected;
         SentryId next;
         using (SentrySdk.Init(o => { Configure(o, cache.Path, handler); o.SendClientReports = true; }))
         {
-            SentrySdk.CaptureMessage("Synthetic rejected delivery");
+            rejected = SentrySdk.CaptureMessage("Synthetic rejected delivery");
             await SentrySdk.FlushAsync(TimeSpan.FromSeconds(3));
+            // Cache transport can queue the flush-generated report after its own flush finishes.
+            await SentrySdk.FlushAsync(TimeSpan.FromSeconds(3));
+            if (reportsLoss)
+                Assert.Contains(handler.Attempts, a => a.Envelope.ClientReport is not null);
             handler.Status = 200;
             next = SentrySdk.CaptureMessage("Synthetic following delivery");
             await SentrySdk.FlushAsync(TimeSpan.FromSeconds(3));
         }
+        Assert.NotEqual(SentryId.Empty, rejected);
         Assert.NotEqual(SentryId.Empty, next);
+        Assert.Single(handler.Attempts, a => a.Envelope.EventId == Guid.Parse(rejected.ToString()).ToString() && a.Status == status);
         if (reportsLoss)
         {
             Assert.Contains(next.ToString(), handler.EventIds);
-            var counter = Assert.Single(handler.Parsed.Where(e => e.ClientReport is not null).SelectMany(e => e.ClientReport!.Counters));
-            Assert.Equal(new SentryDiscardCounter("send_error", "error", 1), counter);
+            Assert.Single(handler.Attempts, a => a.Envelope.EventId == Guid.Parse(next.ToString()).ToString() && a.Status == 200);
+            var rejectedReports = handler.Attempts.Where(a => a.Status >= 400 && a.Envelope.ClientReport is not null).ToArray();
+            Assert.Equal(rejectFirstReport ? 1 : 0, rejectedReports.Length);
+            var delivered = handler.Attempts.Where(a => a.Status == 200 && a.Envelope.ClientReport is not null)
+                .SelectMany(a => a.Envelope.ClientReport!.Counters).OrderBy(c => c.Category).ToArray();
+            // Sentry 6.8 restores a rejected report's counters and counts that report as internal/send_error.
+            var expected = rejectFirstReport
+                ? new[] { new SentryDiscardCounter("send_error", "error", 1), new SentryDiscardCounter("send_error", "internal", 1) }
+                : new[] { new SentryDiscardCounter("send_error", "error", 1) };
+            Assert.Equal(expected, delivered);
         }
         else
         {
@@ -112,6 +129,9 @@ public class HttpFailureSemanticsTests
     private sealed class ResponseHandler(int? status) : HttpMessageHandler
     {
         public int? Status { get; set; } = status;
+        public bool RejectFirstReport { get; init; }
+        private int reportRequests;
+        public ConcurrentBag<(SentryEnvelope Envelope, int? Status)> Attempts { get; } = new();
         public ConcurrentBag<string> EventIds { get; } = new();
         public ConcurrentBag<SentryEnvelope> Parsed { get; } = new();
 
@@ -126,9 +146,13 @@ public class HttpFailureSemanticsTests
             var envelope = SentryEnvelopeParser.Parse(decoded.ToArray());
             Parsed.Add(envelope);
             if (envelope.EventId is not null) EventIds.Add(Guid.Parse(envelope.EventId).ToString("N"));
-            if (Status is null) throw new HttpRequestException("Synthetic transport failure before a response");
-            var response = new HttpResponseMessage((HttpStatusCode)Status.Value) { Content = new StringContent("{}") };
-            if (Status is 429 or 503) response.Headers.RetryAfter = new(TimeSpan.FromSeconds(60));
+            var responseStatus = Status;
+            if (envelope.ClientReport is not null && envelope.EventId is null)
+                responseStatus = RejectFirstReport && Interlocked.Increment(ref reportRequests) == 1 ? 500 : 200;
+            Attempts.Add((envelope, responseStatus));
+            if (responseStatus is null) throw new HttpRequestException("Synthetic transport failure before a response");
+            var response = new HttpResponseMessage((HttpStatusCode)responseStatus.Value) { Content = new StringContent("{}") };
+            if (responseStatus is 429 or 503) response.Headers.RetryAfter = new(TimeSpan.FromSeconds(60));
             return response;
         }
     }
