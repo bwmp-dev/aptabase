@@ -266,6 +266,7 @@ type SessionCounts = {
   eligible: number;
   crashed: number;
   eligibleCrashed: number;
+  unhandled: number;
   abnormal: number;
   active: number;
   errored: number;
@@ -273,9 +274,9 @@ type SessionCounts = {
 
 // Sample session health per release and environment pair, release builds only.
 const sampleSessionGroups: (SessionCounts & { release: string; environment: string })[] = [
-  { release: "2.4.0", environment: "production", observed: 120, withStart: 118, eligible: 100, crashed: 3, eligibleCrashed: 2, abnormal: 4, active: 14, errored: 9 },
-  { release: "2.3.1", environment: "production", observed: 40, withStart: 40, eligible: 38, crashed: 1, eligibleCrashed: 1, abnormal: 0, active: 2, errored: 3 },
-  { release: "2.4.0", environment: "beta", observed: 3, withStart: 2, eligible: 0, crashed: 0, eligibleCrashed: 0, abnormal: 0, active: 2, errored: 0 },
+  { release: "2.4.0", environment: "production", observed: 120, withStart: 118, eligible: 100, crashed: 3, eligibleCrashed: 2, unhandled: 2, abnormal: 4, active: 12, errored: 9 },
+  { release: "2.3.1", environment: "production", observed: 40, withStart: 40, eligible: 38, crashed: 1, eligibleCrashed: 1, unhandled: 0, abnormal: 0, active: 2, errored: 3 },
+  { release: "2.4.0", environment: "beta", observed: 3, withStart: 2, eligible: 0, crashed: 0, eligibleCrashed: 0, unhandled: 0, abnormal: 0, active: 2, errored: 0 },
 ];
 
 // Discard counters with the release context of their accompanying event; "" marks a metadata-only report.
@@ -547,7 +548,7 @@ export class FixtureApi {
       (!release || row.release === release) && (!environment || row.environment === environment);
     const live = this.scope(url) === "release" && !this.cleared;
     const groups = live ? sampleSessionGroups.filter(matches) : [];
-    const keys = ["observed", "withStart", "eligible", "crashed", "eligibleCrashed", "abnormal", "active", "errored"] as const;
+    const keys = ["observed", "withStart", "eligible", "crashed", "eligibleCrashed", "unhandled", "abnormal", "active", "errored"] as const;
     const totals = Object.fromEntries(keys.map((key) => [key, groups.reduce((sum, g) => sum + g[key], 0)])) as SessionCounts;
     const reports = live ? sampleClientReports.filter(matches) : [];
     return {

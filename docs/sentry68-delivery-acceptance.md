@@ -52,3 +52,9 @@ dotnet test tests/SdkReliability --no-restore -m:1
 ```
 
 Do not substitute the prepared MAUI executable, another launcher or computer controls. Its approved single retry was denied before execution with only `blocked by policy`; no further launch was attempted. See the [retirement matrix](glitchtip-retirement-readiness.md) for owner/environment-dependent gates.
+
+## Local terminal-session compatibility correction
+
+The 2026-11-13 lifecycle investigation added support for Sentry 6.8's actual serialized `unhandled` status, distinct from `crashed`. It can represent a nonterminal unhandled exception; it is excluded from the completed-session crash-free denominator and reported separately. Migration 0025 widens the status constraint without rewriting prior session values; rollback refuses existing unhandled rows. The change is not deployed by this evidence record.
+
+`SessionLifecycleReliabilityTests` now proves, with the real 6.8 SDK and a socket-free terminal transport, that flush alone leaves a session active, explicit normal shutdown emits Exited, and cached error plus terminal session survives transport failure/reinitialization. Synthetic exception mechanism flags additionally make the SDK derive Crashed or Unhandled itself; no WinUI hook is claimed. Acknowledged replay drains the synthetic envelope cache. Full SDK suite: 30 passed, zero failed, one collector-host test skipped. The separately executed PostgreSQL session/migration cases both passed, including concurrent replay and lossy-rollback refusal. See [full-app investigation](fullapp-reporting-acceptance-plan.md#investigation-and-local-corrections-2026-11-13-utc) for actual runtime failure evidence and remaining gates.

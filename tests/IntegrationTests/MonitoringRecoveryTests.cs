@@ -59,7 +59,7 @@ public class MonitoringRecoveryTests(ITestOutputHelper output)
             runner.MigrateUp();
             runner.MigrateUp();
             Assert.Equal(before, await connection.ExecuteScalarAsync<string>(snapshot));
-            Assert.Equal(24, await connection.ExecuteScalarAsync<long>("SELECT max(version) FROM migration_history"));
+            Assert.Equal(25, await connection.ExecuteScalarAsync<long>("SELECT max(version) FROM migration_history"));
             Assert.True(await connection.ExecuteScalarAsync<bool>("""
                 SELECT capture_errors AND capture_performance AND forward_raw_errors
                     AND NOT local_alerts_enabled AND monitoring_retention_days=30

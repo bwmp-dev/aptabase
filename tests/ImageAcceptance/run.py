@@ -169,10 +169,10 @@ proxy_set_header X-Forwarded-Proto https; proxy_set_header X-Forwarded-For $remo
         except urllib.error.URLError as e:
             assert isinstance(e.reason, ssl.SSLCertVerificationError)
         passed('default system trust rejects the test certificate')
-        assert docker('exec', pg, 'psql', '-U', 'postgres', '-d', 'aptabase', '-Atc', 'SELECT max(version) FROM migration_history') == '24'
+        assert docker('exec', pg, 'psql', '-U', 'postgres', '-d', 'aptabase', '-Atc', 'SELECT max(version) FROM migration_history') == '25'
         tables = docker('exec', ch, 'clickhouse-client', '--query', 'SHOW TABLES')
         assert 'error_events' in tables and 'events' in tables
-        passed('PostgreSQL schema24 and ClickHouse analytics/error tables created by image startup')
+        passed('PostgreSQL schema25 and ClickHouse analytics/error tables created by image startup')
         assert request(anonymous, '/api/_auth/me')[0] == 401
         assert request(owner, '/api/_auth/register', {'name':'Synthetic owner','email':'owner@example.test'})[0] == 200
         messages = json.loads(request(anonymous, MAIL+'/messages')[2])
@@ -214,6 +214,20 @@ proxy_set_header X-Forwarded-Proto https; proxy_set_header X-Forwarded-For $remo
         assert issues['pagination']['total']==1 and issues['issues'][0]['occurrenceCount']==1
         assert 'Synthetic.Throw (Synthetic.cs) line 353:17' in issues['issues'][0]['stackTrace']
         passed('HTTPS DSN, synthetic error ingestion/retry dedup and authenticated issue access')
+        session = {'sid': uuid.uuid4().hex, 'started': event['timestamp'], 'timestamp': event['timestamp'],
+            'seq': 1, 'init': True, 'status': 'unhandled', 'errors': 1,
+            'attrs': {'release': 'image@1', 'environment': 'synthetic'}}
+        mixed = wire + (json.dumps({'type':'session'})+'\n'+json.dumps(session)+'\n').encode()
+        assert request(anonymous, endpoint, mixed, raw=True)[0] == 200
+        assert request(anonymous, endpoint, mixed, raw=True)[0] == 200
+        health_path = f'/api/v0/apps/{appid}/monitoring/health?buildMode=release'
+        assert request(anonymous, health_path)[0] == 401
+        health = json.loads(request(owner, health_path)[2])['sessions']
+        assert health['observed'] == 1 and health['unhandled'] == 1
+        assert health['eligible'] == 0 and health['crashed'] == 0 and health['active'] == 0
+        assert health['incomplete'] == 1 and health['crashFreeRate'] is None
+        assert json.loads(request(owner, f'/api/v0/apps/{appid}/issues')[2])['issues'][0]['occurrenceCount'] == 1
+        passed('mixed unhandled session replay preserves error dedup and excludes unconfirmed crashes from rate')
         key_files = key_fingerprints(app)
         assert key_files
         old_resource = next(item for item in resources if item[0] == app)
@@ -236,6 +250,7 @@ proxy_set_header X-Forwarded-Proto https; proxy_set_header X-Forwarded-For $remo
         assert request(anonymous, endpoint, wire, raw=True)[0] == 200
         issues = json.loads(request(owner, f'/api/v0/apps/{appid}/issues')[2])
         assert issues['pagination']['total']==1 and issues['issues'][0]['occurrenceCount']==1
+        assert json.loads(request(owner, health_path)[2])['sessions'] == health
         passed('container replacement preserves mounted keys, login and retry receipts; migrations remain idempotent')
         assert request(owner, '/api/_auth/signout', {}, 'POST')[0]==302
         assert request(owner, '/api/_auth/me')[0]==401

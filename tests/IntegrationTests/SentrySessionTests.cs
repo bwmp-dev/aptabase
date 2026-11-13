@@ -224,7 +224,70 @@ public class SentrySessionTests
             Assert.Equal(100, truncated.GetProperty("groups").GetArrayLength());
             Assert.Equal(102, truncated.GetProperty("sessions").GetProperty("observed").GetInt64());
             Assert.Equal(100, truncated.GetProperty("sessions").GetProperty("crashFreeRate").GetDouble());
+            var unhandledSession = Guid.NewGuid();
+            var unhandledEvent = Guid.NewGuid();
+            var healthBeforeUnhandled = (await Health()).GetProperty("sessions");
+            var unhandledBatch = new[] { ("event", Error(unhandledEvent)),
+                ("session", Session(unhandledSession, "unhandled", true, 1, 1)) };
+            var replayed = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => Send(rotatedProject, unhandledBatch)));
+            Assert.All(replayed, response => Assert.Equal(HttpStatusCode.OK, response.StatusCode));
+            var healthWithUnhandled = (await Health()).GetProperty("sessions");
+            Assert.Equal(1, healthWithUnhandled.GetProperty("unhandled").GetInt64());
+            Assert.Equal(healthBeforeUnhandled.GetProperty("eligible").GetInt64(), healthWithUnhandled.GetProperty("eligible").GetInt64());
+            Assert.Equal(healthBeforeUnhandled.GetProperty("crashed").GetInt64(), healthWithUnhandled.GetProperty("crashed").GetInt64());
+            Assert.Equal(1, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts WHERE event_id=@unhandledEvent", new { unhandledEvent }));
+            foreach (var status in new[] { "ok", "exited", "abnormal" })
+                Assert.Equal(HttpStatusCode.OK, (await Send(rotatedProject, ("session", Session(unhandledSession, status, false, 2)))).StatusCode);
+            Assert.Equal(1, (await Health()).GetProperty("sessions").GetProperty("unhandled").GetInt64());
+            Assert.Equal(0, (await Health("debug")).GetProperty("sessions").GetProperty("unhandled").GetInt64());
+            var invalidBatchEvent = Guid.NewGuid();
+            Assert.Equal(HttpStatusCode.BadRequest, (await Send(rotatedProject, ("event", Error(invalidBatchEvent)),
+                ("session", Session(Guid.NewGuid(), "not-real", true, 1)))).StatusCode);
+            Assert.Equal(0, await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM error_receipts WHERE event_id=@invalidBatchEvent", new { invalidBatchEvent }));
+            Assert.Equal(HttpStatusCode.OK, (await Send(rotatedProject, ("session", Session(unhandledSession, "crashed", false, 3, 1)))).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await Send(rotatedProject, unhandledBatch)).StatusCode);
+            var escalated = (await Health()).GetProperty("sessions");
+            Assert.Equal(0, escalated.GetProperty("unhandled").GetInt64());
+            Assert.Equal(healthBeforeUnhandled.GetProperty("crashed").GetInt64() + 1, escalated.GetProperty("crashed").GetInt64());
             await app.StopAsync();
+        }
+        finally { await admin.ExecuteAsync($"DROP DATABASE {database} WITH (FORCE)"); }
+    }
+
+    [Fact]
+    public async Task Migration25PreservesExistingSessionsAndRefusesLossyRollback()
+    {
+        var adminUrl = Environment.GetEnvironmentVariable("APTABASE_ISSUE_TEST_DATABASE_URL")
+            ?? throw new InvalidOperationException("An isolated PostgreSQL test instance is required");
+        var database = "aptabase_session_migration_" + Guid.NewGuid().ToString("N");
+        await using var admin = new NpgsqlConnection(adminUrl);
+        await admin.OpenAsync();
+        await admin.ExecuteAsync($"CREATE DATABASE {database}");
+        try
+        {
+            var url = new NpgsqlConnectionStringBuilder(adminUrl) { Database = database }.ConnectionString;
+            await using var services = new ServiceCollection().AddFluentMigratorCore().ConfigureRunner(r =>
+                r.AddPostgres().WithGlobalConnectionString(url).ScanIn(typeof(Program).Assembly).For.Migrations()).BuildServiceProvider();
+            using var scope = services.CreateScope();
+            var runner = scope.ServiceProvider.GetRequiredService<IMigrationRunner>();
+            runner.MigrateUp(24);
+            await using var db = new NpgsqlConnection(url);
+            await db.OpenAsync();
+            await db.ExecuteAsync("""
+                INSERT INTO users(id,name,email) VALUES ('owner','Synthetic','owner@example.test');
+                INSERT INTO apps(id,owner_id,name,app_key,has_events) VALUES ('migration-app','owner','Synthetic','SYNTHETIC',false);
+                INSERT INTO monitoring_sessions(app_id,is_debug,session_key,started_at,updated_at,sequence,saw_init,status,errors,duration_seconds,release,environment)
+                VALUES('migration-app',false,repeat('a',64),CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1,true,'exited',0,1,'synthetic','test');
+                """);
+            var before = await db.ExecuteScalarAsync<string>("SELECT row_to_json(s)::text FROM monitoring_sessions s");
+            runner.MigrateUp(25);
+            Assert.Equal(before, await db.ExecuteScalarAsync<string>("SELECT row_to_json(s)::text FROM monitoring_sessions s"));
+            runner.MigrateDown(24);
+            Assert.Equal(before, await db.ExecuteScalarAsync<string>("SELECT row_to_json(s)::text FROM monitoring_sessions s"));
+            runner.MigrateUp(25);
+            await db.ExecuteAsync("UPDATE monitoring_sessions SET status='unhandled'");
+            Assert.ThrowsAny<Exception>(() => runner.MigrateDown(24));
+            Assert.Equal("unhandled", await db.ExecuteScalarAsync<string>("SELECT status FROM monitoring_sessions"));
         }
         finally { await admin.ExecuteAsync($"DROP DATABASE {database} WITH (FORCE)"); }
     }

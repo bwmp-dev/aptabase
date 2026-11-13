@@ -95,6 +95,7 @@ test.describe("Session health against the real test host", () => {
         eligible: 2,
         crashed: 1,
         eligibleCrashed: 1,
+        unhandled: 0,
         abnormal: 0,
         active: 1,
         errored: 1,

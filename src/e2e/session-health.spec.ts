@@ -16,6 +16,8 @@ test.describe("Session health UI with fixture API", () => {
     await expect(rate).toContainText("97.8%");
     await expect(rate).toContainText("135 of 138 completed sessions ended without a crash.");
     await expect(page.getByText(/not crash-free usage overall/)).toBeVisible();
+    await expect(page.getByText("Unhandled, no crash recorded", { exact: true }).locator("xpath=following-sibling::dd[1]")).toHaveText("2");
+    await expect(page.getByText(/not confirmed crashes and are not counted as completed/)).toBeVisible();
     await expect(page.getByRole("table", { name: /Sessions by release and environment/ }).getByRole("row")).toHaveCount(4);
     await expect(page.getByRole("table", { name: /Sessions by release and environment/ })).toContainText("None complete");
     const reports = page.getByRole("region", { name: "SDK discard reports" });

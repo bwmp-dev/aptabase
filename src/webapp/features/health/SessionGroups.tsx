@@ -39,6 +39,9 @@ export function SessionGroups({ groups, truncated }: Props) {
                 Crashed
               </th>
               <th scope="col" className="hidden sm:table-cell px-3 py-3 text-right text-sm font-semibold">
+                Unhandled
+              </th>
+              <th scope="col" className="hidden sm:table-cell px-3 py-3 text-right text-sm font-semibold">
                 Not counted
               </th>
               <th scope="col" className="hidden md:table-cell px-3 py-3 text-right text-sm font-semibold">
@@ -65,6 +68,9 @@ export function SessionGroups({ groups, truncated }: Props) {
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 text-sm text-right tabular-nums">
                   {group.crashed.toLocaleString()}
+                </td>
+                <td className="hidden sm:table-cell whitespace-nowrap px-3 py-3 text-sm text-right tabular-nums">
+                  {group.unhandled.toLocaleString()}
                 </td>
                 <td className="hidden sm:table-cell whitespace-nowrap px-3 py-3 text-sm text-right tabular-nums">
                   {group.incomplete.toLocaleString()}

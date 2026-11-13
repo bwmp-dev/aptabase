@@ -9,6 +9,7 @@ export interface SessionCounts {
   eligible: number;
   crashed: number;
   eligibleCrashed: number;
+  unhandled: number;
   abnormal: number;
   active: number;
   errored: number;

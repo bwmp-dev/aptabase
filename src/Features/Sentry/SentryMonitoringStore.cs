@@ -18,6 +18,7 @@ public class SessionHealthCounts
     public long Eligible { get; set; }
     public long Crashed { get; set; }
     public long EligibleCrashed { get; set; }
+    public long Unhandled { get; set; }
     public long Abnormal { get; set; }
     public long Active { get; set; }
     public long Errored { get; set; }
@@ -112,6 +113,7 @@ public class SentryMonitoringStore(IDbContext db, IPiiSanitizer sanitizer, Error
                 errors=GREATEST(monitoring_sessions.errors,EXCLUDED.errors),
                 duration_seconds=GREATEST(monitoring_sessions.duration_seconds,EXCLUDED.duration_seconds),
                 status=CASE WHEN monitoring_sessions.status='crashed' OR EXCLUDED.status='crashed' THEN 'crashed'
+                    WHEN monitoring_sessions.status='unhandled' OR EXCLUDED.status='unhandled' THEN 'unhandled'
                     WHEN monitoring_sessions.status='abnormal' OR EXCLUDED.status='abnormal' THEN 'abnormal'
                     WHEN monitoring_sessions.status='exited' OR EXCLUDED.status='exited' THEN 'exited' ELSE 'ok' END
             """, new { project.AppId, project.IsDebug, key, session.Started, session.Timestamp, session.Sequence, session.Init,
@@ -155,6 +157,7 @@ public class SentryMonitoringStore(IDbContext db, IPiiSanitizer sanitizer, Error
             COUNT(*) FILTER(WHERE saw_init AND status IN ('exited','crashed')) AS eligible,
             COUNT(*) FILTER(WHERE status='crashed') AS crashed,
             COUNT(*) FILTER(WHERE saw_init AND status='crashed') AS eligible_crashed,
+            COUNT(*) FILTER(WHERE status='unhandled') AS unhandled,
             COUNT(*) FILTER(WHERE status='abnormal') AS abnormal,
             COUNT(*) FILTER(WHERE status='ok') AS active,
             COUNT(*) FILTER(WHERE errors>0) AS errored

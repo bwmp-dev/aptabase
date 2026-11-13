@@ -77,6 +77,7 @@ public class EnvelopeInventoryTests
 
     [Theory]
     [InlineData(SessionEndStatus.Crashed, "crashed")]
+    [InlineData(SessionEndStatus.Unhandled, "unhandled")]
     [InlineData(SessionEndStatus.Exited, "exited")]
     [InlineData(SessionEndStatus.Abnormal, "abnormal")]
     public async Task Actual_Sdk_Terminal_Session_Forms_Preserve_Cumulative_Fields_Without_Identity(SessionEndStatus end, string status)

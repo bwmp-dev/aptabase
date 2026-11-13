@@ -26,6 +26,7 @@ function counts(overrides: Partial<SessionCounts> = {}): SessionCounts {
     eligible: 2,
     crashed: 1,
     eligibleCrashed: 1,
+    unhandled: 0,
     abnormal: 0,
     active: 1,
     errored: 1,
@@ -153,6 +154,7 @@ describe("SessionHealthPanel", () => {
                 eligible: 25,
                 crashed: 6,
                 eligibleCrashed: 4,
+                unhandled: 2,
                 abnormal: 3,
                 active: 9,
                 errored: 11,
@@ -170,6 +172,7 @@ describe("SessionHealthPanel", () => {
     expect(coverageValue("Not counted")).toBe("15");
     expect(coverageValue("Still active")).toBe("9");
     expect(coverageValue("Ended abnormally")).toBe("3");
+    expect(coverageValue("Unhandled, no crash recorded")).toBe("2");
     expect(coverageValue("Start not received")).toBe("5");
     expect(coverageValue("Crashed")).toBe("6");
     expect(coverageValue("Crashed and counted")).toBe("4");
@@ -192,6 +195,79 @@ describe("SessionHealthPanel", () => {
     const groups = screen.getByRole("table", { name: /Sessions by release and environment/ });
     expect(within(groups).getByText("None complete")).toBeTruthy();
     expect(groups.textContent).not.toMatch(/\d%/);
+  });
+
+  it("leaves unhandled-only sessions out of the rate without calling them crashes", async () => {
+    const unhandledOnly = counts({
+      observed: 2,
+      withStart: 2,
+      eligible: 0,
+      crashed: 0,
+      eligibleCrashed: 0,
+      unhandled: 2,
+      active: 0,
+      errored: 2,
+      incomplete: 2,
+      crashFreeRate: null,
+    });
+    override = (url) =>
+      url.pathname.endsWith("/monitoring/health")
+        ? { status: 200, body: health({ sessions: unhandledOnly, groups: [group(unhandledOnly)] }) }
+        : undefined;
+    renderPanel();
+
+    const rate = await screen.findByTestId("crash-free-rate");
+    expect(rate.textContent).toContain("No completed sessions");
+    expect(rate.textContent).toContain("2 observed, none complete.");
+    expect(coverageValue("Unhandled, no crash recorded")).toBe("2");
+    expect(coverageValue("Counted in the rate")).toBe("0");
+    expect(coverageValue("Not counted")).toBe("2");
+    expect(coverageValue("Crashed")).toBe("0");
+    expect(coverageValue("Crashed and counted")).toBe("0");
+    expect(screen.getByText(/not confirmed crashes and are not counted as completed/)).toBeTruthy();
+    const table = screen.getByRole("table", { name: /Sessions by release and environment/ });
+    const cells = within(within(table).getAllByRole("row")[1]).getAllByRole("cell");
+    expect(cells.map((cell) => cell.textContent)).toEqual(["app@1synthetic", "None complete", "0", "0", "2", "2", "2"]);
+    expect(document.body.textContent).not.toMatch(/\d%/);
+  });
+
+  it("keeps the rate denominator to completed sessions when unhandled sessions are mixed in", async () => {
+    const mixed = counts({
+      observed: 10,
+      withStart: 10,
+      eligible: 4,
+      crashed: 1,
+      eligibleCrashed: 1,
+      unhandled: 3,
+      abnormal: 0,
+      active: 3,
+      errored: 5,
+      incomplete: 6,
+      crashFreeRate: 75,
+    });
+    override = (url) =>
+      url.pathname.endsWith("/monitoring/health")
+        ? { status: 200, body: health({ sessions: mixed, groups: [group(mixed)] }) }
+        : undefined;
+    renderPanel();
+
+    const rate = await screen.findByTestId("crash-free-rate");
+    expect(rate.textContent).toContain("75%");
+    expect(rate.textContent).toContain("3 of 4 completed sessions ended without a crash.");
+    expect(coverageValue("Unhandled, no crash recorded")).toBe("3");
+    expect(coverageValue("Crashed")).toBe("1");
+    expect(coverageValue("Not counted")).toBe("6");
+    const table = screen.getByRole("table", { name: /Sessions by release and environment/ });
+    const cells = within(within(table).getAllByRole("row")[1]).getAllByRole("cell");
+    expect(cells.map((cell) => cell.textContent)).toEqual(["app@1synthetic", "75%", "4", "1", "3", "6", "10"]);
+  });
+
+  it("explains unhandled sessions only when there are some", async () => {
+    renderPanel();
+    await screen.findByTestId("crash-free-rate");
+
+    expect(coverageValue("Unhandled, no crash recorded")).toBe("0");
+    expect(screen.queryByText(/not confirmed crashes and are not counted as completed/)).toBeNull();
   });
 
   it("lists release groups, marks missing context and explains truncation", async () => {

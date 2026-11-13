@@ -22,8 +22,8 @@ internal static class SentryDeliveryMetadata
         var started = Time(body, "started");
         var timestamp = Time(body, "timestamp");
         if (timestamp < started) throw new FormatException("Invalid session time order");
-        var status = Text(body, "status", 8, false) ?? "ok";
-        if (status is not ("ok" or "exited" or "crashed" or "abnormal")) throw new FormatException("Invalid session status");
+        var status = Text(body, "status", 9, false) ?? "ok";
+        if (status is not ("ok" or "exited" or "crashed" or "abnormal" or "unhandled")) throw new FormatException("Invalid session status");
         var init = false;
         if (body.TryGetProperty("init", out var initNode))
         {

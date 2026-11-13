@@ -12,6 +12,7 @@ export function SessionSummary({ sessions, retentionDays }: Props) {
     ["Not counted", sessions.incomplete],
     ["Still active", sessions.active],
     ["Ended abnormally", sessions.abnormal],
+    ["Unhandled, no crash recorded", sessions.unhandled],
     ["Start not received", sessions.observed - sessions.withStart],
     ["Crashed", sessions.crashed],
     ["Crashed and counted", sessions.eligibleCrashed],
@@ -25,9 +26,9 @@ export function SessionSummary({ sessions, retentionDays }: Props) {
           Crash-free completed sessions
         </h2>
         <p className="text-sm text-muted-foreground max-w-3xl">
-          Only sessions whose start was received and that ended as exited or crashed are counted. Active, abnormal and
-          partially received sessions are left out, so this is not crash-free usage overall, and there is no per-user
-          rate. Sessions are kept for up to {retentionDays} days.
+          Only sessions whose start was received and that ended as exited or crashed are counted. Active, abnormal,
+          unhandled and partially received sessions are left out, so this is not crash-free usage overall, and there is
+          no per-user rate. Sessions are kept for up to {retentionDays} days.
         </p>
       </div>
 
@@ -72,8 +73,16 @@ export function SessionSummary({ sessions, retentionDays }: Props) {
               ))}
             </dl>
             <p className="text-xs text-muted-foreground max-w-sm">
-              A session can be both active and missing its start, so the reasons for not counting can overlap.
+              A session can be missing its start and also be active, abnormal or unhandled, so the reasons for not
+              counting can overlap.
             </p>
+            {sessions.unhandled > 0 && (
+              <p className="text-xs text-muted-foreground max-w-sm">
+                Unhandled sessions reported an unhandled exception without a crash. They are not confirmed crashes
+                and are not counted as completed, even if they later end normally. A later crash report moves them to
+                crashed.
+              </p>
+            )}
           </div>
         </div>
       )}
